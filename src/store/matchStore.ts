@@ -1,0 +1,131 @@
+import type { BidAction, MatchAnimEvent, PlayerView, Seat } from "@shared/game";
+import type { MatchDisplay } from "@/ui/motion/playMatchAnimScript";
+import { create } from "zustand";
+import { errText } from "@/ui/i18n/ru";
+import { matchAnimQueue } from "@/ui/motion/animationQueue";
+import {
+  emptyDisplay,
+
+  playMatchAnimScript,
+} from "@/ui/motion/playMatchAnimScript";
+import { getSocket } from "../net/socket";
+
+interface MatchState {
+  matchId: string | null;
+  committed: PlayerView | null;
+  display: MatchDisplay;
+  players: { seat: Seat; name: string }[];
+  error: string | null;
+  endedReason: string | null;
+  join: (matchId: string) => void;
+  bid: (action: BidAction) => void;
+  play: (cardId: string) => void;
+  nextHand: () => void;
+  clear: () => void;
+  clearError: () => void;
+}
+
+export const useMatchStore = create<MatchState>((set, get) => ({
+  matchId: null,
+  committed: null,
+  display: emptyDisplay(),
+  players: [],
+  error: null,
+  endedReason: null,
+  join: (matchId) => {
+    const s = getSocket();
+    matchAnimQueue.reset();
+    set({
+      matchId,
+      committed: null,
+      display: emptyDisplay(),
+      players: [],
+      error: null,
+      endedReason: null,
+    });
+    s.emit("match:join", { matchId }, (res: { error?: string }) => {
+      if (res?.error)
+        set({ error: errText(res.error) });
+    });
+    s.off("match:state");
+    s.off("match:ended");
+    s.on(
+      "match:state",
+      (payload: {
+        matchId: string;
+        view: PlayerView;
+        players: { seat: Seat; name: string }[];
+        anim?: MatchAnimEvent[];
+        snap?: boolean;
+      }) => {
+        if (payload.matchId !== get().matchId)
+          return;
+
+        set({ players: payload.players, committed: payload.view, error: null });
+
+        playMatchAnimScript({
+          anim: payload.anim ?? [],
+          nextView: payload.view,
+          snap: payload.snap === true,
+          setDisplay: (patch) => {
+            set((state) => {
+              const nextPatch
+                = typeof patch === "function" ? patch(state.display) : patch;
+              return {
+                display: { ...state.display, ...nextPatch },
+              };
+            });
+          },
+        });
+      },
+    );
+    s.on("match:ended", (payload: { matchId: string; reason?: string }) => {
+      if (payload.matchId !== get().matchId)
+        return;
+      set({
+        endedReason: payload.reason === "opponent_left"
+          ? "opponent_left"
+          : "ended",
+      });
+    });
+  },
+  bid: (action) => {
+    const matchId = get().matchId;
+    if (!matchId || get().display.animBusy)
+      return;
+    getSocket().emit("match:bid", { matchId, action }, (res: { error?: string }) => {
+      if (res?.error)
+        set({ error: errText(res.error) });
+    });
+  },
+  play: (cardId) => {
+    const matchId = get().matchId;
+    if (!matchId || get().display.animBusy)
+      return;
+    getSocket().emit("match:play", { matchId, cardId }, (res: { error?: string }) => {
+      if (res?.error)
+        set({ error: errText(res.error) });
+    });
+  },
+  nextHand: () => {
+    const matchId = get().matchId;
+    if (!matchId || get().display.animBusy)
+      return;
+    getSocket().emit("match:nextHand", { matchId }, (res: { error?: string }) => {
+      if (res?.error)
+        set({ error: errText(res.error) });
+    });
+  },
+  clear: () => {
+    matchAnimQueue.reset();
+    set({
+      matchId: null,
+      committed: null,
+      display: emptyDisplay(),
+      players: [],
+      error: null,
+      endedReason: null,
+    });
+  },
+  clearError: () => set({ error: null }),
+}));

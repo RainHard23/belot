@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Nunito", ui-sans-serif, system-ui, sans-serif;
+  --color-bg: #19191d;
+  --color-surface: #1d1d22;
+  --color-surface-2: #25252b;
+  --color-accent: #fb9e1d;
+  --color-play: #e53935;
+  --color-muted: #74747c;
+  --color-gold-1: #ffe1a0;
+  --color-gold-2: #fb9e1d;
+  --color-gold-3: #7a4e10;
+}
+
+:root {
+  color: #f3f3f3;
+  background: #19191d;
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Casino table skins — swap felt/rail palette via [data-table-theme] on an
+ * ancestor. Gold trim (--gold-*) stays constant across skins for brand
+ * consistency; only felt + rail change.
+ */
+:root,
+[data-table-theme="emerald"] {
+  --felt-hi: #1f6b4f;
+  --felt-mid: #124a37;
+  --felt-lo: #072921;
+  --rail-hi: #6b4a30;
+  --rail-mid: #3a2717;
+  --rail-lo: #170f09;
+}
+
+[data-table-theme="sapphire"] {
+  --felt-hi: #205e82;
+  --felt-mid: #12405a;
+  --felt-lo: #06202e;
+  --rail-hi: #59493a;
+  --rail-mid: #302517;
+  --rail-lo: #130e08;
+}
+
+[data-table-theme="burgundy"] {
+  --felt-hi: #7c2338;
+  --felt-mid: #551526;
+  --felt-lo: #2a0a12;
+  --rail-hi: #6b3a2f;
+  --rail-mid: #3a1e17;
+  --rail-lo: #170b09;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-height: 100vh;
+  background: #19191d;
+}
+
+button {
+  font: inherit;
+}
