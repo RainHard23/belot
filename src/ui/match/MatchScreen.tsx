@@ -16,6 +16,7 @@ const TABLE_THEMES = [
   { id: "emerald", label: "Изумруд", swatch: "#1f6b4f" },
   { id: "sapphire", label: "Сапфир", swatch: "#205e82" },
   { id: "burgundy", label: "Бордо", swatch: "#7c2338" },
+  { id: "neon", label: "Неон", swatch: "linear-gradient(135deg,#16244f,#3b6bff)" },
 ] as const;
 
 function useTableTheme() {
@@ -470,7 +471,22 @@ function ThemeSwitch({
 function RoomBackdrop() {
   return (
     <>
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_35%,_#2a2a34_0%,_#151518_45%,_#0a0a0c_100%)]" />
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(ellipse at 50% 35%, var(--room-c1) 0%, var(--room-c2) 45%, var(--room-c3) 100%)",
+        }}
+      />
+      {/* Light-ray spokes — only visible on themes that opt in (e.g. Neon) via --room-rays-opacity */}
+      <div
+        className="pointer-events-none absolute inset-0 blur-[2px] mix-blend-screen"
+        style={{
+          background:
+            "repeating-conic-gradient(from 0deg at 50% 38%, var(--room-rays-color) 0deg 1.1deg, transparent 1.1deg 13deg)",
+          opacity: "var(--room-rays-opacity)",
+        }}
+      />
       <div
         className="pointer-events-none absolute inset-0 opacity-[0.04]"
         style={{

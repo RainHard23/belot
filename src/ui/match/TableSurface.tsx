@@ -36,9 +36,10 @@ export function TableSurface({
           background:
             "linear-gradient(180deg, var(--rail-hi) 0%, var(--rail-mid) 52%, var(--rail-lo) 100%)",
           boxShadow: [
-            "inset 0 3px 0 rgba(255,255,255,.16)",
+            "inset 0 3px 0 var(--rail-rim)",
             "inset 0 -14px 30px rgba(0,0,0,.65)",
             "0 50px 90px rgba(0,0,0,.7)",
+            "var(--table-glow)",
           ].join(", "),
         }}
       >

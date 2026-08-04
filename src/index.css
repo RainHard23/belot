@@ -35,6 +35,31 @@
   --rail-hi: #6b4a30;
   --rail-mid: #3a2717;
   --rail-lo: #170f09;
+  --rail-rim: rgba(255, 255, 255, 0.16);
+  --table-glow: 0 0 0 rgba(0, 0, 0, 0);
+  /* Room backdrop (behind the table) — default dim neutral room. */
+  --room-c1: #2a2a34;
+  --room-c2: #151518;
+  --room-c3: #0a0a0c;
+  --room-rays-color: transparent;
+  --room-rays-opacity: 0;
+}
+
+/* Neon skin — glowing midnight-blue room + light rays, glossy teal/gunmetal table. */
+[data-table-theme="neon"] {
+  --felt-hi: #1d4a54;
+  --felt-mid: #103038;
+  --felt-lo: #05161b;
+  --rail-hi: #3a4666;
+  --rail-mid: #1c2438;
+  --rail-lo: #090c16;
+  --rail-rim: rgba(120, 180, 255, 0.4);
+  --table-glow: 0 0 90px 8px rgba(59, 110, 255, 0.35);
+  --room-c1: #16244f;
+  --room-c2: #0a1330;
+  --room-c3: #020410;
+  --room-rays-color: #3b6bff;
+  --room-rays-opacity: 0.16;
 }
 
 [data-table-theme="sapphire"] {
