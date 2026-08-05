@@ -43,23 +43,48 @@
   --room-c3: #0a0a0c;
   --room-rays-color: transparent;
   --room-rays-opacity: 0;
+  --neon-ring: transparent;
+  --neon-ring-glow: none;
+  /* Room environment behind the table — wall pillars + floor contact glow. */
+  --wall-panel: rgba(255, 255, 255, 0.03);
+  --wall-strip: rgba(251, 158, 29, 0.14);
+  --floor-glow: rgba(251, 158, 29, 0.05);
 }
 
-/* Neon skin — glowing midnight-blue room + light rays, glossy teal/gunmetal table. */
+/* Neon skin — glowing midnight-blue room + light rays, glossy black/gunmetal
+ * table with a bright cyan neon tube tracing the rail (WPT Global style). */
 [data-table-theme="neon"] {
-  --felt-hi: #1d4a54;
-  --felt-mid: #103038;
-  --felt-lo: #05161b;
-  --rail-hi: #3a4666;
-  --rail-mid: #1c2438;
-  --rail-lo: #090c16;
-  --rail-rim: rgba(120, 180, 255, 0.4);
-  --table-glow: 0 0 90px 8px rgba(59, 110, 255, 0.35);
+  --felt-hi: #132a30;
+  --felt-mid: #081418;
+  --felt-lo: #01050a;
+  --rail-hi: #262e46;
+  --rail-mid: #12172a;
+  --rail-lo: #05070f;
+  --rail-rim: rgba(140, 200, 255, 0.3);
+  --table-glow: 0 0 90px 8px rgba(59, 110, 255, 0.3);
   --room-c1: #16244f;
   --room-c2: #0a1330;
   --room-c3: #020410;
   --room-rays-color: #3b6bff;
   --room-rays-opacity: 0.16;
+  --neon-ring: #35e6ff;
+  --neon-ring-glow:
+    0 0 10px 2px rgba(53, 230, 255, 0.85),
+    0 0 34px 8px rgba(53, 230, 255, 0.45),
+    inset 0 0 12px 2px rgba(53, 230, 255, 0.55);
+  --wall-panel: rgba(20, 40, 90, 0.35);
+  --wall-strip: #35e6ff;
+  --floor-glow: rgba(53, 150, 255, 0.28);
+}
+
+@keyframes neon-ring-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.72;
+  }
 }
 
 [data-table-theme="sapphire"] {
@@ -69,6 +94,8 @@
   --rail-hi: #59493a;
   --rail-mid: #302517;
   --rail-lo: #130e08;
+  --wall-strip: rgba(111, 168, 251, 0.18);
+  --floor-glow: rgba(111, 168, 251, 0.08);
 }
 
 [data-table-theme="burgundy"] {
@@ -78,6 +105,8 @@
   --rail-hi: #6b3a2f;
   --rail-mid: #3a1e17;
   --rail-lo: #170b09;
+  --wall-strip: rgba(251, 176, 61, 0.16);
+  --floor-glow: rgba(251, 61, 61, 0.06);
 }
 
 @media (prefers-reduced-motion: reduce) {
