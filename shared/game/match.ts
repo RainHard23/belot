@@ -298,6 +298,8 @@ export function perspective(state: MatchState, seat: Seat) {
     kittyCount: state.kitty.length,
     target: 501 as number,
     matchOver: null as null | { winner: Seat; reason: "points" | "bolts" },
+    /** Epoch ms when the current turn auto-resolves server-side, or null. */
+    turnDeadlineAt: null as number | null,
   };
 }
 

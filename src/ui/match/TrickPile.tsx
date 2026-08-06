@@ -40,7 +40,7 @@ export function TrickPile({
             <CardBack />
           </div>
         ))}
-        <span className="absolute -bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] font-bold text-[var(--gold-2)]">
+        <span className="absolute -bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] font-bold text-[var(--accent)]">
           {count}
         </span>
       </motion.div>

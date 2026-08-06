@@ -31,6 +31,17 @@ export const DEFAULT_MATCH_TARGET = 501;
 export class MatchService {
   private matches = new Map<string, ServerMatch>();
   private bySession = new Map<string, string>();
+  /**
+   * Wired up in providers.ts to `TurnTimerService.deadlineFor` after both
+   * singletons exist — avoids a circular constructor dependency (the timer
+   * service needs `MatchService` to act on timeout) while still letting
+   * `broadcast` attach the live deadline to every `match:state` payload.
+   */
+  private deadlineProvider: ((matchId: string) => number | null) | null = null;
+
+  setDeadlineProvider(fn: (matchId: string) => number | null) {
+    this.deadlineProvider = fn;
+  }
 
   createFromTable(table: LobbyTable, target = DEFAULT_MATCH_TARGET): ServerMatch {
     const seats = table.seats
@@ -91,6 +102,7 @@ export class MatchService {
 
     const snap = opts?.snap === true;
     const winner = this.matchWinner(match);
+    const turnDeadlineAt = this.deadlineProvider?.(matchId) ?? null;
 
     for (const s of match.seats) {
       const view = perspective(match.state, s.seat);
@@ -110,6 +122,7 @@ export class MatchService {
           matchOver: winner
             ? { winner: winner.seat, reason: winner.reason }
             : null,
+          turnDeadlineAt,
         },
         anim,
         snap,

@@ -7,10 +7,10 @@ import { CardFace } from "@/ui/cards/CardFace";
 /** Widths as clamp() so cards scale down on 768-1279px, and further on <768px. */
 const SIZE = {
   xs: "clamp(30px, 4.2vw, 40px)",
-  sm: "clamp(42px, 6vw, 56px)",
+  sm: "clamp(44px, 6.4vw, 62px)",
   md: "clamp(58px, 8vw, 78px)",
   lg: "clamp(74px, 10vw, 100px)",
-  xl: "clamp(82px, 11.5vw, 118px)",
+  xl: "clamp(86px, 12.5vw, 140px)",
 } as const;
 const CARD_ASPECT = "240 / 336";
 

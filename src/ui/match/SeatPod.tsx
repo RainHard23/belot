@@ -1,12 +1,14 @@
+import type { SeatReaction } from "@/store/matchStore";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { ASSETS, avatarUrl } from "@/ui/assets";
+import { emitAmbient } from "@/ui/match/ambientBus";
 
 const RING_R = 38;
 const RING_C = 2 * Math.PI * RING_R;
-/** Cosmetic-only "live table" cue — no server-enforced turn timeout. */
-const TURN_RING_MS = 14_000;
+/** Below this many ms left, the ring turns red and ticks faster-feeling. */
+const URGENT_MS = 5_000;
 
 export function SeatPod({
   name,
@@ -18,6 +20,8 @@ export function SeatPod({
   declarations,
   position,
   compact,
+  reaction,
+  turnDeadlineAt,
 }: {
   name: string;
   you?: boolean;
@@ -28,17 +32,55 @@ export function SeatPod({
   declarations?: string[];
   position: "top" | "bottom";
   compact?: boolean;
+  /** Network-driven emote — same shape for both seats, not local-only. */
+  reaction?: SeatReaction | null;
+  /** Real server deadline (epoch ms) for the current turn, if this seat is active. */
+  turnDeadlineAt?: number | null;
 }) {
   const src = you ? ASSETS.avatarDefault : avatarUrl(name);
   const size = compact ? 56 : 72;
   const [turnKey, setTurnKey] = useState(0);
   const wasActiveRef = useRef(false);
+  const timedOutRef = useRef(false);
+  const prevTricksRef = useRef(tricks);
+  const [trickFlash, setTrickFlash] = useState(false);
 
   useEffect(() => {
-    if (active && !wasActiveRef.current)
+    if (tricks > prevTricksRef.current) {
+      setTrickFlash(true);
+      const t = setTimeout(setTrickFlash, 700, false);
+      prevTricksRef.current = tricks;
+      return () => clearTimeout(t);
+    }
+    prevTricksRef.current = tricks;
+  }, [tricks]);
+
+  useEffect(() => {
+    if (active && !wasActiveRef.current) {
       setTurnKey(k => k + 1);
+      timedOutRef.current = false;
+      if (you)
+        emitAmbient("turn_start");
+    }
     wasActiveRef.current = !!active;
-  }, [active]);
+  }, [active, you]);
+
+  const hasDeadline = active && typeof turnDeadlineAt === "number";
+  const durationMs = hasDeadline ? Math.max(0, turnDeadlineAt! - Date.now()) : null;
+
+  // Fire a local "timeout" cue once the visible ring empties, purely as a UX
+  // beat — the server is the actual authority and will broadcast whatever it
+  // decided a moment later via the normal match:state flow.
+  useEffect(() => {
+    if (!hasDeadline || !you || timedOutRef.current)
+      return;
+    const ms = Math.max(0, turnDeadlineAt! - Date.now());
+    const t = setTimeout(() => {
+      timedOutRef.current = true;
+      emitAmbient("timeout");
+    }, ms);
+    return () => clearTimeout(t);
+  }, [hasDeadline, turnDeadlineAt, you]);
 
   return (
     <motion.div
@@ -51,6 +93,20 @@ export function SeatPod({
       )}
     >
       <AnimatePresence>
+        {reaction && (
+          <motion.div
+            key={reaction.ts}
+            initial={{ opacity: 0, y: 8, scale: 0.6 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.5 }}
+            className="pointer-events-none absolute -top-3 left-1/2 z-40 -translate-x-1/2 text-2xl drop-shadow-lg"
+          >
+            {reaction.kind}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {declarations && declarations.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: position === "top" ? -8 : 8, scale: 0.9 }}
@@ -61,7 +117,7 @@ export function SeatPod({
             {declarations.map(label => (
               <span
                 key={label}
-                className="rounded-full border border-[var(--gold-2)]/40 bg-black/60 px-2 py-0.5 text-[10px] font-bold text-[var(--gold-2)] backdrop-blur"
+                className="rounded-full border border-[var(--accent)]/40 bg-black/60 px-2 py-0.5 text-[10px] font-bold text-[var(--accent)] backdrop-blur"
               >
                 {label}
               </span>
@@ -71,7 +127,7 @@ export function SeatPod({
       </AnimatePresence>
 
       <div className="relative" style={{ width: size, height: size }}>
-        {/* Turn ring — cosmetic pulse, not a real countdown */}
+        {/* Turn ring — real server deadline once known, cosmetic spin otherwise */}
         {active && (
           <svg
             key={turnKey}
@@ -93,29 +149,30 @@ export function SeatPod({
               cy="48"
               r={RING_R}
               fill="none"
-              stroke="var(--gold-2)"
+              stroke={durationMs !== null && durationMs < URGENT_MS ? "#ff4d4d" : "var(--accent)"}
               strokeWidth="4"
               strokeLinecap="round"
               strokeDasharray={RING_C}
               transform="rotate(-90 48 48)"
               initial={{ strokeDashoffset: 0 }}
               animate={{ strokeDashoffset: RING_C }}
-              transition={{ duration: TURN_RING_MS / 1000, ease: "linear" }}
+              transition={{ duration: (durationMs ?? 14_000) / 1000, ease: "linear" }}
             />
           </svg>
         )}
 
         <div
           className={cn(
-            "relative h-full w-full overflow-hidden rounded-full border-[3px] bg-[#1d1d22]",
+            "relative h-full w-full overflow-hidden rounded-full border-[3px] bg-[var(--surface)] transition-shadow",
+            trickFlash && "shadow-[0_0_0_5px_var(--accent-soft)]",
             active
-              ? "border-[var(--gold-2)] shadow-[0_0_28px_rgba(251,158,29,0.55)]"
+              ? "border-[var(--accent)] shadow-[0_0_28px_var(--accent-soft)]"
               : "border-[#3a3a42] shadow-[0_8px_24px_rgba(0,0,0,0.45)]",
           )}
         >
           <img src={src} alt="" className="h-full w-full object-cover" />
           {you && (
-            <span className="absolute inset-x-0 bottom-0 bg-black/55 py-0.5 text-center text-[9px] font-bold uppercase tracking-wide text-[var(--gold-2)]">
+            <span className="absolute inset-x-0 bottom-0 bg-black/55 py-0.5 text-center text-[9px] font-bold uppercase tracking-wide text-[var(--accent)]">
               вы
             </span>
           )}
@@ -143,13 +200,26 @@ export function SeatPod({
         )}
       </div>
 
-      <div className="min-w-[128px] rounded-[12px] border border-white/[0.06] bg-[#121316]/92 px-3.5 py-1.5 text-center shadow-lg backdrop-blur-md">
+      <div className="relative min-w-[128px] rounded-[12px] border border-white/[0.06] bg-[#121316]/92 px-3.5 py-1.5 text-center shadow-lg backdrop-blur-md">
         <div className="truncate text-[14px] font-bold tracking-tight text-white">{name}</div>
-        <div className="text-[11px] font-semibold text-[var(--gold-2)]">
+        <div className="text-[11px] font-semibold text-[var(--accent)]">
           {tricks}
           {" "}
           взятки
         </div>
+        <AnimatePresence>
+          {trickFlash && (
+            <motion.span
+              key={tricks}
+              initial={{ opacity: 0, y: 0, scale: 0.8 }}
+              animate={{ opacity: 1, y: -14, scale: 1.15 }}
+              exit={{ opacity: 0 }}
+              className="pointer-events-none absolute right-2 top-0 text-sm font-extrabold text-[var(--accent-strong)]"
+            >
+              +1
+            </motion.span>
+          )}
+        </AnimatePresence>
       </div>
     </motion.div>
   );

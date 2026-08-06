@@ -24,6 +24,7 @@ export function LobbyScreen({
     selectedId,
     select,
     sit,
+    playBot,
     leave,
     matchId,
     connected,
@@ -107,6 +108,17 @@ export function LobbyScreen({
             </div>
             <Toggle label={ru.hideFull} on={hideFull} onChange={setHideFull} />
             <Toggle label={ru.hideEmpty} on={hideEmpty} onChange={setHideEmpty} />
+            <Button
+              size="sm"
+              variant="secondary"
+              title={ru.playBotHint}
+              onClick={() => playBot()}
+              disabled={!connected || Boolean(seatedTableId)}
+            >
+              🤖
+              {" "}
+              {ru.playBot}
+            </Button>
           </div>
 
           <div className="grid grid-cols-[2.2fr_1fr_1fr_1fr_1.2fr_1.2fr_110px] gap-2 px-4 pb-2 text-[12px] font-semibold uppercase tracking-wider text-[#74747c]">
@@ -130,12 +142,20 @@ export function LobbyScreen({
               const seatedHere = seatedTableId === t.id;
               const canSit = t.filled < 2 || seatedHere;
               return (
-                <button
+                <div
                   key={t.id}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => select(t.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      select(t.id);
+                    }
+                  }}
                   className={cn(
-                    "grid w-full grid-cols-[2.2fr_1fr_1fr_1fr_1.2fr_1.2fr_110px] items-center gap-2 rounded-[14px] px-4 py-3 text-left text-[15px] transition",
+                    "grid w-full cursor-pointer grid-cols-[2.2fr_1fr_1fr_1fr_1.2fr_1.2fr_110px] items-center gap-2 rounded-[14px] px-4 py-3 text-left text-[15px] transition",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fb9e1d]",
                     active
                       ? "bg-[#fb9e1d]/10 text-[#fb9e1d] ring-1 ring-[#fb9e1d]"
                       : "text-[#f3f3f3] hover:bg-white/[0.03]",
@@ -183,7 +203,7 @@ export function LobbyScreen({
                           </Button>
                         )}
                   </span>
-                </button>
+                </div>
               );
             })}
           </div>

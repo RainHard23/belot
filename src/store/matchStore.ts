@@ -1,4 +1,5 @@
 import type { BidAction, MatchAnimEvent, PlayerView, Seat } from "@shared/game";
+import type { EmoteKind, EmotePayload } from "@shared/net/protocol";
 import type { MatchDisplay } from "@/ui/motion/playMatchAnimScript";
 import { create } from "zustand";
 import { errText } from "@/ui/i18n/ru";
@@ -10,6 +11,11 @@ import {
 } from "@/ui/motion/playMatchAnimScript";
 import { getSocket } from "../net/socket";
 
+export interface SeatReaction {
+  kind: EmoteKind;
+  ts: number;
+}
+
 interface MatchState {
   matchId: string | null;
   committed: PlayerView | null;
@@ -17,10 +23,13 @@ interface MatchState {
   players: { seat: Seat; name: string }[];
   error: string | null;
   endedReason: string | null;
+  /** Last emote per seat — network-driven, both players see both sides. */
+  reactions: Partial<Record<Seat, SeatReaction>>;
   join: (matchId: string) => void;
   bid: (action: BidAction) => void;
   play: (cardId: string) => void;
   nextHand: () => void;
+  sendEmote: (kind: EmoteKind) => void;
   clear: () => void;
   clearError: () => void;
 }
@@ -32,6 +41,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
   players: [],
   error: null,
   endedReason: null,
+  reactions: {},
   join: (matchId) => {
     const s = getSocket();
     matchAnimQueue.reset();
@@ -42,6 +52,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
       players: [],
       error: null,
       endedReason: null,
+      reactions: {},
     });
     s.emit("match:join", { matchId }, (res: { error?: string }) => {
       if (res?.error)
@@ -49,6 +60,14 @@ export const useMatchStore = create<MatchState>((set, get) => ({
     });
     s.off("match:state");
     s.off("match:ended");
+    s.off("match:emote");
+    s.on("match:emote", (payload: EmotePayload) => {
+      if (payload.matchId !== get().matchId)
+        return;
+      set(state => ({
+        reactions: { ...state.reactions, [payload.seat]: { kind: payload.kind, ts: payload.ts } },
+      }));
+    });
     s.on(
       "match:state",
       (payload: {
@@ -116,6 +135,15 @@ export const useMatchStore = create<MatchState>((set, get) => ({
         set({ error: errText(res.error) });
     });
   },
+  sendEmote: (kind) => {
+    const matchId = get().matchId;
+    if (!matchId)
+      return;
+    getSocket().emit("match:emote", { matchId, kind }, (res: { error?: string }) => {
+      if (res?.error)
+        set({ error: errText(res.error) });
+    });
+  },
   clear: () => {
     matchAnimQueue.reset();
     set({
@@ -125,6 +153,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
       players: [],
       error: null,
       endedReason: null,
+      reactions: {},
     });
   },
   clearError: () => set({ error: null }),

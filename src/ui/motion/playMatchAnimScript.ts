@@ -1,4 +1,5 @@
 import type { Card, MatchAnimEvent, PlayerView, Seat, TrickPlay } from "@shared/game";
+import { emitAmbient } from "@/ui/match/ambientBus";
 import { matchAnimQueue, sleep } from "./animationQueue";
 
 /** Live visual layer — may lag behind committed server view while anim plays. */
@@ -122,6 +123,7 @@ export function playMatchAnimScript(opts: {
           break;
         }
         case "deal": {
+          emitAmbient("deal");
           const ids = event.cards.map(c => c.id);
           if (event.kind === "initial") {
             // Show backs first, then flip stagger
@@ -177,6 +179,7 @@ export function playMatchAnimScript(opts: {
           break;
         }
         case "opp_deal": {
+          emitAmbient("deal");
           const step = event.kind === "initial" ? 55 : 50;
           for (let n = event.from; n <= event.to; n++) {
             setDisplay({ oppShown: n });
@@ -197,13 +200,21 @@ export function playMatchAnimScript(opts: {
           break;
         }
         case "face_up_hide": {
+          emitAmbient("trump", { seat: event.takenBy, suit: nextView.trump ?? undefined });
           setDisplay(d => ({
             view: d.view ? { ...d.view, faceUp: null } : d.view,
           }));
           await sleep(220);
+          // Declarations (bella, terz, 50…) are resolved server-side the
+          // moment bidding ends, alongside the rest of the deal — this is
+          // the first point in the script where they're known.
+          if (nextView.declarations.length > 0) {
+            emitAmbient("declaration");
+          }
           break;
         }
         case "bid_ui": {
+          emitAmbient("bid");
           setDisplay({
             bidVisible: true,
             view: {
@@ -216,6 +227,7 @@ export function playMatchAnimScript(opts: {
           break;
         }
         case "play": {
+          emitAmbient("play", { seat: event.seat });
           setDisplay((d) => {
             const existing = (d.view?.trick?.length ? d.view.trick : d.heldTrick) ?? [];
             const trick = nextView.trick.length > 0
@@ -239,6 +251,10 @@ export function playMatchAnimScript(opts: {
           break;
         }
         case "trick_collect": {
+          emitAmbient("trick", {
+            seat: event.winner,
+            side: winnerSide(nextView.you, event.winner),
+          });
           setDisplay({
             heldTrick: event.trick,
             collectTo: null,
@@ -259,6 +275,7 @@ export function playMatchAnimScript(opts: {
           break;
         }
         case "hand_end": {
+          emitAmbient("hand_end");
           setDisplay({ view: nextView, bidVisible: false });
           await sleep(200);
           break;

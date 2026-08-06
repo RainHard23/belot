@@ -6,6 +6,16 @@ export interface LobbySeat {
   name: string;
 }
 
+const BOT_PREFIX = "bot:";
+
+export function isBotSession(sessionId: string | undefined | null): boolean {
+  return typeof sessionId === "string" && sessionId.startsWith(BOT_PREFIX);
+}
+
+export function botSessionId(tableId: string): string {
+  return `${BOT_PREFIX}${tableId}`;
+}
+
 export interface LobbyTable {
   id: string;
   name: string;
@@ -130,6 +140,27 @@ export class LobbyService {
       return { error: "table_full" };
     table.seats[free] = { sessionId, name };
     return { table, seatIndex: free };
+  }
+
+  /** Seat a practice bot in the first free slot of a table. */
+  sitBot(tableId: string, name = "Бот"): { table: LobbyTable; seatIndex: number } | { error: string } {
+    const table = this.tables.get(tableId);
+    if (!table)
+      return { error: "table_not_found" };
+    const free = table.seats.findIndex(s => s === null);
+    if (free < 0)
+      return { error: "table_full" };
+    table.seats[free] = { sessionId: botSessionId(tableId), name };
+    return { table, seatIndex: free };
+  }
+
+  /** First table with two free seats and no live match — used for solo practice. */
+  findOpenTable(): LobbyTable | undefined {
+    for (const t of this.tables.values()) {
+      if (!t.matchId && t.seats.every(s => s === null))
+        return t;
+    }
+    return undefined;
   }
 
   leave(tableId: string, sessionId: string) {

@@ -1,5 +1,73 @@
 @import "tailwindcss";
 
+/* Self-hosted Nunito — latin + cyrillic, woff2 only, swap to avoid FOIT.
+ * Replaces the old fonts.googleapis.com <link> so the table never renders
+ * on a system fallback while waiting on a third-party round trip. */
+@font-face {
+  font-family: "Nunito";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/nunito-400-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Nunito";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/nunito-400-cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Nunito";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/nunito-600-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Nunito";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/nunito-600-cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Nunito";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/nunito-700-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Nunito";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/nunito-700-cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Nunito";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("/fonts/nunito-800-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Nunito";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("/fonts/nunito-800-cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
 @theme {
   --font-sans: "Nunito", ui-sans-serif, system-ui, sans-serif;
   --color-bg: #19191d;
@@ -20,6 +88,29 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+
+  /* Aliases so plain `var(--gold-2)` (used throughout match/* components)
+   * resolves — @theme only emits `--color-gold-2` for Tailwind's utility
+   * generator, it does NOT also define a bare `--gold-2` custom property. */
+  --gold-1: var(--color-gold-1);
+  --gold-2: var(--color-gold-2);
+  --gold-3: var(--color-gold-3);
+  --muted: var(--color-muted);
+  --surface: var(--color-surface);
+  --surface-2: var(--color-surface-2);
+
+  /* Game-UI chrome tokens — panels/buttons/focus rings read these instead of
+   * hardcoded hex, so every [data-table-theme] can restyle the whole HUD,
+   * not just the felt/rail. Defaults here are the warm "emerald" look. */
+  --accent: var(--gold-2);
+  --accent-strong: var(--gold-1);
+  --accent-soft: rgb(251 158 29 / 0.18);
+  --accent-ring: rgb(251 158 29 / 0.55);
+  --panel-bg: rgb(10 11 14 / 0.62);
+  --panel-bg-strong: rgb(10 11 14 / 0.85);
+  --panel-border: rgb(255 255 255 / 0.08);
+  --panel-radius: 16px;
+  --panel-shadow: 0 18px 48px rgb(0 0 0 / 0.5);
 }
 
 /*
@@ -37,44 +128,101 @@
   --rail-lo: #170f09;
   --rail-rim: rgba(255, 255, 255, 0.16);
   --table-glow: 0 0 0 rgba(0, 0, 0, 0);
-  /* Room backdrop (behind the table) — default dim neutral room. */
-  --room-c1: #2a2a34;
-  --room-c2: #151518;
-  --room-c3: #0a0a0c;
-  --room-rays-color: transparent;
-  --room-rays-opacity: 0;
+
+  /*
+   * Room (see ui/match/room/RoomStage.tsx). Emerald is the warm
+   * wood-panelled hall: brass sconces, herringbone parquet, matte floor that
+   * barely reflects.
+   */
+  --room-c1: #24312a;
+  --room-c2: #131a16;
+  --room-c3: #080b09;
+  --room-base: radial-gradient(ellipse at 50% 20%, var(--room-c1) 0%, var(--room-c2) 46%, var(--room-c3) 100%);
+  --wall-1: #2a382c;
+  --wall-2: #101813;
+  --wall-panel-w: 86px;
+  --wall-strip: transparent;
+  --joint-color: rgba(255, 226, 180, 0.1);
+  --floor-tex: url("/textures/parquet.webp");
+  --floor-tex-size: 9cqh;
+  /* Floor stays clearly darker than the felt — the table is the subject. */
+  --floor-tint: #7a5c3a;
+  --floor-base: #221a11;
+  --floor-pool: rgba(255, 206, 140, 0.26);
+  --horizon-fade: rgba(6, 9, 7, 0.95);
+  --cove-color: rgba(255, 196, 122, 0.3);
+  --sconce-color: rgba(255, 190, 120, 0.3);
+  --plinth-hi: rgba(255, 214, 160, 0.32);
+  --light-neutral: rgba(255, 214, 150, 0.16);
+  --light-warm: rgba(255, 198, 120, 0.26);
+  --light-cold: rgba(130, 170, 225, 0.15);
+  /** How wet the floor looks under the table (matte parquet: barely). */
+  --reflect-opacity: 0.22;
+  --reflect-color: rgba(255, 206, 150, 0.55);
+  --floor-streak: rgba(255, 216, 165, 0.05);
+
   --neon-ring: transparent;
   --neon-ring-glow: none;
-  /* Room environment behind the table — wall pillars + floor contact glow. */
-  --wall-panel: rgba(255, 255, 255, 0.03);
-  --wall-strip: rgba(251, 158, 29, 0.14);
+  /* Colored light pool on the floor under the table's near edge. */
   --floor-glow: rgba(251, 158, 29, 0.05);
+
+  /* UI chrome accent for this skin — warm brass/gold (emerald default). */
+  --accent: var(--gold-2);
+  --accent-strong: var(--gold-1);
+  --accent-soft: rgba(251, 158, 29, 0.18);
+  --accent-ring: rgba(251, 158, 29, 0.55);
 }
 
 /* Neon skin — glowing midnight-blue room + light rays, glossy black/gunmetal
  * table with a bright cyan neon tube tracing the rail (WPT Global style). */
 [data-table-theme="neon"] {
-  --felt-hi: #132a30;
-  --felt-mid: #081418;
-  --felt-lo: #01050a;
-  --rail-hi: #262e46;
-  --rail-mid: #12172a;
+  --felt-hi: #1a4a78;
+  --felt-mid: #0c2a4a;
+  --felt-lo: #041018;
+  --rail-hi: #2a3550;
+  --rail-mid: #12182a;
   --rail-lo: #05070f;
-  --rail-rim: rgba(140, 200, 255, 0.3);
-  --table-glow: 0 0 90px 8px rgba(59, 110, 255, 0.3);
-  --room-c1: #16244f;
-  --room-c2: #0a1330;
-  --room-c3: #020410;
-  --room-rays-color: #3b6bff;
-  --room-rays-opacity: 0.16;
+  --rail-rim: rgba(140, 220, 255, 0.45);
+  --table-glow: 0 0 100px 12px rgba(53, 230, 255, 0.28);
+
+  /* Black-glass arena: cyan cove strips, polished floor with a wet look. */
+  --room-c1: #16294f;
+  --room-c2: #081127;
+  --room-c3: #02050c;
+  --room-base: radial-gradient(ellipse at 50% 20%, var(--room-c1) 0%, var(--room-c2) 46%, var(--room-c3) 100%);
+  --wall-1: #16294a;
+  --wall-2: #050914;
+  --wall-panel-w: 150px;
+  --wall-strip: rgba(53, 230, 255, 0.3);
+  --joint-color: rgba(90, 200, 255, 0.16);
+  --floor-tex: url("/textures/marble.webp");
+  --floor-tex-size: 14cqh;
+  --floor-tint: #2b5075;
+  --floor-base: #070d1a;
+  --floor-pool: rgba(53, 200, 255, 0.3);
+  --horizon-fade: rgba(2, 5, 12, 0.95);
+  --cove-color: rgba(53, 230, 255, 0.4);
+  --sconce-color: rgba(53, 210, 255, 0.26);
+  --plinth-hi: rgba(120, 235, 255, 0.4);
+  --light-neutral: rgba(120, 220, 255, 0.18);
+  --light-warm: rgba(180, 245, 255, 0.26);
+  --light-cold: rgba(90, 140, 210, 0.18);
+  --reflect-opacity: 0.45;
+  --reflect-color: rgba(90, 235, 255, 0.6);
+  --floor-streak: rgba(110, 225, 255, 0.09);
+
   --neon-ring: #35e6ff;
   --neon-ring-glow:
-    0 0 10px 2px rgba(53, 230, 255, 0.85),
-    0 0 34px 8px rgba(53, 230, 255, 0.45),
-    inset 0 0 12px 2px rgba(53, 230, 255, 0.55);
-  --wall-panel: rgba(20, 40, 90, 0.35);
-  --wall-strip: #35e6ff;
-  --floor-glow: rgba(53, 150, 255, 0.28);
+    0 0 12px 2px rgba(53, 230, 255, 0.9),
+    0 0 40px 10px rgba(53, 230, 255, 0.4),
+    inset 0 0 14px 2px rgba(53, 230, 255, 0.5);
+  --floor-glow: rgba(53, 180, 255, 0.22);
+
+  /* UI chrome accent — bright cyan, matches the neon rail tube. */
+  --accent: #35e6ff;
+  --accent-strong: #b4f5ff;
+  --accent-soft: rgba(53, 230, 255, 0.18);
+  --accent-ring: rgba(53, 230, 255, 0.6);
 }
 
 @keyframes neon-ring-pulse {
@@ -94,8 +242,39 @@
   --rail-hi: #59493a;
   --rail-mid: #302517;
   --rail-lo: #130e08;
-  --wall-strip: rgba(111, 168, 251, 0.18);
   --floor-glow: rgba(111, 168, 251, 0.08);
+
+  /* Skyline lounge: cool steel walls, polished marble, city glow at the back. */
+  --room-c1: #1a3550;
+  --room-c2: #101c30;
+  --room-c3: #060a14;
+  --room-base: radial-gradient(ellipse at 50% 20%, var(--room-c1) 0%, var(--room-c2) 46%, var(--room-c3) 100%);
+  --wall-1: #22364a;
+  --wall-2: #0c141e;
+  --wall-panel-w: 132px;
+  --wall-strip: rgba(190, 222, 255, 0.16);
+  --joint-color: rgba(200, 226, 255, 0.13);
+  --floor-tex: url("/textures/marble.webp");
+  --floor-tex-size: 17cqh;
+  --floor-tint: #4c5a6b;
+  --floor-base: #101820;
+  --floor-pool: rgba(180, 214, 255, 0.24);
+  --horizon-fade: rgba(6, 10, 20, 0.95);
+  --cove-color: rgba(140, 190, 255, 0.32);
+  --sconce-color: rgba(165, 205, 255, 0.26);
+  --plinth-hi: rgba(200, 226, 255, 0.38);
+  --light-neutral: rgba(170, 210, 255, 0.15);
+  --light-warm: rgba(230, 240, 255, 0.24);
+  --light-cold: rgba(110, 150, 210, 0.18);
+  --reflect-opacity: 0.34;
+  --reflect-color: rgba(190, 224, 255, 0.55);
+  --floor-streak: rgba(200, 226, 255, 0.08);
+
+  /* UI chrome accent — polished steel-blue. */
+  --accent: #6fa8fb;
+  --accent-strong: #cfe4ff;
+  --accent-soft: rgba(111, 168, 251, 0.18);
+  --accent-ring: rgba(111, 168, 251, 0.55);
 }
 
 [data-table-theme="burgundy"] {
@@ -105,8 +284,100 @@
   --rail-hi: #6b3a2f;
   --rail-mid: #3a1e17;
   --rail-lo: #170b09;
-  --wall-strip: rgba(251, 176, 61, 0.16);
   --floor-glow: rgba(251, 61, 61, 0.06);
+
+  /* Candlelit salon: leather walls, red carpet — carpet doesn't reflect. */
+  --room-c1: #3a1c20;
+  --room-c2: #1c0e10;
+  --room-c3: #0a0505;
+  --room-base: radial-gradient(ellipse at 50% 20%, var(--room-c1) 0%, var(--room-c2) 46%, var(--room-c3) 100%);
+  --wall-1: #3a1d22;
+  --wall-2: #150a0c;
+  --wall-panel-w: 78px;
+  --wall-strip: transparent;
+  --joint-color: rgba(255, 206, 170, 0.11);
+  --floor-tex: url("/textures/carpet.webp");
+  --floor-tex-size: 11cqh;
+  --floor-tint: #9c4048;
+  --floor-base: #2a1417;
+  --floor-pool: rgba(255, 170, 120, 0.24);
+  --horizon-fade: rgba(9, 4, 5, 0.95);
+  --cove-color: rgba(255, 154, 96, 0.28);
+  --sconce-color: rgba(255, 172, 112, 0.3);
+  --plinth-hi: rgba(255, 200, 150, 0.3);
+  --light-neutral: rgba(255, 184, 132, 0.15);
+  --light-warm: rgba(255, 190, 128, 0.26);
+  --light-cold: rgba(150, 160, 200, 0.13);
+  /* Carpet: essentially no specular reflection, and no light streaks either. */
+  --reflect-opacity: 0.1;
+  --reflect-color: rgba(255, 180, 130, 0.45);
+  --floor-streak: rgba(255, 190, 140, 0.03);
+
+  /* UI chrome accent — antique brass. */
+  --accent: #e0a458;
+  --accent-strong: #ffd9a0;
+  --accent-soft: rgba(224, 164, 88, 0.18);
+  --accent-ring: rgba(224, 164, 88, 0.55);
+}
+
+/*
+ * (room-drift Ken Burns removed — static photo backdrop)
+ * Ambient light pulses (MatchScreen AmbientOverlay). Opacity capped ~0.25 so
+ * cards stay readable. Reduced-motion collapses these via the global rule below.
+ */
+@keyframes ambient-flash {
+  0% {
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.ambient-pulse-bid,
+.ambient-pulse-play,
+.ambient-pulse-trick,
+.ambient-pulse-trump,
+.ambient-pulse-deal,
+.ambient-pulse-hand-end {
+  animation: ambient-flash 0.65s ease-out forwards;
+}
+
+.ambient-pulse-bid {
+  background: radial-gradient(ellipse at 50% 40%, rgba(251, 158, 29, 0.22) 0%, transparent 62%);
+}
+
+.ambient-pulse-play {
+  background: radial-gradient(ellipse at 50% 48%, rgba(255, 255, 255, 0.1) 0%, transparent 55%);
+}
+
+.ambient-pulse-trick {
+  background: radial-gradient(ellipse at 50% 78%, rgba(255, 220, 140, 0.28) 0%, transparent 58%);
+}
+
+.ambient-pulse-deal {
+  background: radial-gradient(ellipse at 50% 30%, rgba(140, 180, 255, 0.14) 0%, transparent 60%);
+}
+
+.ambient-pulse-hand-end {
+  background: radial-gradient(ellipse at 50% 45%, rgba(251, 158, 29, 0.16) 0%, transparent 65%);
+}
+
+.ambient-pulse-trump {
+  background: radial-gradient(ellipse at 50% 42%, rgba(255, 255, 255, 0.08) 0%, transparent 60%);
+}
+
+.ambient-trump-hearts,
+.ambient-trump-diamonds {
+  background: radial-gradient(ellipse at 50% 42%, rgba(200, 40, 50, 0.2) 0%, transparent 60%);
+}
+
+.ambient-trump-spades,
+.ambient-trump-clubs {
+  background: radial-gradient(ellipse at 50% 42%, rgba(90, 140, 255, 0.18) 0%, transparent 60%);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -122,6 +393,34 @@
 
 * {
   box-sizing: border-box;
+}
+
+/* Shared chrome for HUD pills / side panels / popovers — reads the active
+ * theme's accent instead of a hardcoded hex, so the whole UI (not just the
+ * felt) changes with the table skin. */
+.panel {
+  border-radius: var(--panel-radius);
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg);
+  box-shadow: var(--panel-shadow);
+  backdrop-filter: blur(14px);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+}
+
+/* Match-over confetti (HandEndPanel) — falls + rotates + fades, pure CSS. */
+@keyframes confetti-fall {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(340px) rotate(340deg);
+    opacity: 0;
+  }
 }
 
 html,

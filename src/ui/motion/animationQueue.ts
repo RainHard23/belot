@@ -1,3 +1,5 @@
+import { useSettingsStore } from "@/store/settingsStore";
+
 type Job = () => Promise<void> | void;
 
 /** Serializes visual events so WS state jumps don't skip animations */
@@ -48,6 +50,11 @@ export class AnimationQueue {
 export const matchAnimQueue = new AnimationQueue();
 
 function reducedMotion() {
+  const override = useSettingsStore.getState().reducedMotionOverride;
+  if (override === "on")
+    return true;
+  if (override === "off")
+    return false;
   return (
     typeof window !== "undefined"
     && typeof window.matchMedia === "function"

@@ -4,8 +4,11 @@ import type {
 } from "@nestjs/websockets";
 import type { Server, Socket } from "socket.io";
 import type { BidAction } from "../../shared/game";
+import type { EmotePayload } from "../../shared/net/protocol";
 import type { LobbyService } from "./lobby/lobby.service";
+import type { BotService } from "./match/bot.service";
 import type { MatchService } from "./match/match.service";
+import type { TurnTimerService } from "./match/turn-timer.service";
 import type { SessionService } from "./session/session.service";
 import { Inject } from "@nestjs/common";
 import {
@@ -15,7 +18,14 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from "@nestjs/websockets";
-import { LOBBY, MATCH, SESSION } from "./providers";
+import { isEmoteKind } from "../../shared/net/protocol";
+import { isBotSession } from "./lobby/lobby.service";
+import { BOT, LOBBY, MATCH, SESSION, TURN_TIMER } from "./providers";
+import { SlidingWindowLimiter } from "./rate-limiter";
+
+/** Per-session emote rate limit: at most 5 emotes per rolling 10s window. */
+const EMOTE_WINDOW_MS = 10_000;
+const EMOTE_MAX_PER_WINDOW = 5;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
@@ -30,11 +40,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   /** Pending teardown after last socket for a session drops */
   private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private emoteLimiter = new SlidingWindowLimiter(EMOTE_MAX_PER_WINDOW, EMOTE_WINDOW_MS);
 
   constructor(
     @Inject(SESSION) private readonly sessions: SessionService,
     @Inject(LOBBY) private readonly lobby: LobbyService,
     @Inject(MATCH) private readonly matches: MatchService,
+    @Inject(BOT) private readonly bot: BotService,
+    @Inject(TURN_TIMER) private readonly turnTimer: TurnTimerService,
   ) {}
 
   handleConnection(client: Socket) {
@@ -70,6 +83,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
               matchId: table.matchId,
               tableId: table.id,
             });
+            this.turnTimer.schedule(table.matchId, this.server);
             this.matches.broadcast(table.matchId, this.server, { snap: true });
           }
           else {
@@ -106,11 +120,25 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private teardownSession(sessionId: string) {
     const match = this.matches.getBySession(sessionId);
     if (match) {
+      this.bot.cancel(match.id);
+      this.turnTimer.cancel(match.id);
       this.matches.notifyOpponentLeft(match.id, sessionId, this.server);
       this.lobby.setMatch(match.tableId, null);
     }
-    this.lobby.leaveAll(sessionId);
+    const touched = this.lobby.leaveAll(sessionId);
+    for (const tableId of touched) this.vacateBotIfAlone(tableId);
+    this.emoteLimiter.reset(sessionId);
     this.server.emit("lobby:tables", this.lobby.list());
+  }
+
+  /** A practice bot can't sit at a table by itself once the human leaves. */
+  private vacateBotIfAlone(tableId: string) {
+    const table = this.lobby.get(tableId);
+    if (!table)
+      return;
+    const remaining = table.seats.filter((s): s is NonNullable<typeof s> => s !== null);
+    if (remaining.length === 1 && isBotSession(remaining[0].sessionId))
+      this.lobby.leave(tableId, remaining[0].sessionId);
   }
 
   @SubscribeMessage("session:name")
@@ -164,7 +192,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
           this.server.to(`session:${seat.sessionId}`).emit("match:start", payload);
         }
       }
+      this.turnTimer.schedule(match.id, this.server);
       this.matches.broadcast(match.id, this.server);
+      this.bot.poke(match.id, this.server);
     }
 
     return {
@@ -172,6 +202,41 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       seatIndex: result.seatIndex,
       table: this.lobby.list().find(t => t.id === body.tableId),
     };
+  }
+
+  /** Solo practice: sit alone, a bot fills the other seat and the match starts immediately. */
+  @SubscribeMessage("lobby:practice")
+  practice(@ConnectedSocket() client: Socket) {
+    const sessionId = client.data.sessionId as string;
+    const session = this.sessions.get(sessionId);
+    if (!session)
+      return { error: "no_session" };
+
+    const openTable = this.lobby.findOpenTable();
+    if (!openTable)
+      return { error: "table_full" };
+
+    const sitResult = this.lobby.sit(openTable.id, sessionId, session.name);
+    if ("error" in sitResult)
+      return sitResult;
+    const botResult = this.lobby.sitBot(openTable.id);
+    if ("error" in botResult)
+      return botResult;
+
+    client.join(`table:${openTable.id}`);
+    this.server.emit("lobby:tables", this.lobby.list());
+
+    const target = Number.parseInt(botResult.table.stakes.replace(/\D/g, ""), 10) || 501;
+    const match = this.matches.createFromTable(botResult.table, target);
+    this.lobby.setMatch(openTable.id, match.id);
+
+    const payload = { matchId: match.id, tableId: openTable.id };
+    this.server.to(`session:${sessionId}`).emit("match:start", payload);
+    this.turnTimer.schedule(match.id, this.server);
+    this.matches.broadcast(match.id, this.server);
+    this.bot.poke(match.id, this.server);
+
+    return { ok: true, ...payload };
   }
 
   @SubscribeMessage("lobby:leave")
@@ -186,11 +251,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const table = this.lobby.get(body.tableId);
     const matchId = table?.matchId;
     if (matchId) {
+      this.bot.cancel(matchId);
+      this.turnTimer.cancel(matchId);
       this.matches.notifyOpponentLeft(matchId, sessionId, this.server);
       this.lobby.setMatch(body.tableId, null);
     }
 
     this.lobby.leave(body.tableId, sessionId);
+    this.vacateBotIfAlone(body.tableId);
     client.leave(`table:${body.tableId}`);
     this.server.emit("lobby:tables", this.lobby.list());
     return { ok: true };
@@ -212,6 +280,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     client.join(`session:${sessionId}`);
     client.join(`match:${body.matchId}`);
+    this.turnTimer.schedule(body.matchId, this.server);
     this.matches.broadcast(body.matchId, this.server, { snap: true });
     return { ok: true };
   }
@@ -227,7 +296,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const result = this.matches.doBid(body.matchId, sessionId, body.action);
     if ("error" in result)
       return result;
+    this.turnTimer.schedule(body.matchId, this.server);
     this.matches.broadcast(body.matchId, this.server);
+    this.bot.poke(body.matchId, this.server);
     return { ok: true };
   }
 
@@ -242,7 +313,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const result = this.matches.doPlay(body.matchId, sessionId, body.cardId);
     if ("error" in result)
       return result;
+    this.turnTimer.schedule(body.matchId, this.server);
     this.matches.broadcast(body.matchId, this.server);
+    this.bot.poke(body.matchId, this.server);
     return { ok: true };
   }
 
@@ -257,7 +330,37 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const result = this.matches.nextHand(body.matchId, sessionId);
     if ("error" in result)
       return result;
+    this.turnTimer.schedule(body.matchId, this.server);
     this.matches.broadcast(body.matchId, this.server);
+    this.bot.poke(body.matchId, this.server);
+    return { ok: true };
+  }
+
+  /**
+   * Table emote — orthogonal to game state (no `prevState`/anim diffing),
+   * so it bypasses `MatchService.broadcast` entirely and goes straight to
+   * the `match:` room both seats already joined on join/resume.
+   */
+  @SubscribeMessage("match:emote")
+  emote(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { matchId?: string; kind?: string },
+  ) {
+    const sessionId = client.data.sessionId as string;
+    if (!body?.matchId || !isEmoteKind(body.kind))
+      return { error: "invalid_payload" };
+    const match = this.matches.get(body.matchId);
+    if (!match)
+      return { error: "no_match" };
+    const seat = this.matches.seatOf(match, sessionId);
+    if (!seat)
+      return { error: "not_seated" };
+
+    if (!this.emoteLimiter.tryConsume(sessionId))
+      return { error: "rate_limited" };
+
+    const payload: EmotePayload = { matchId: body.matchId, seat, kind: body.kind, ts: Date.now() };
+    this.server.to(`match:${body.matchId}`).emit("match:emote", payload);
     return { ok: true };
   }
 }

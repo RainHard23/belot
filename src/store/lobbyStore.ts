@@ -28,6 +28,8 @@ interface LobbyState {
   connect: () => void;
   select: (id: string) => void;
   sit: (tableId: string) => void;
+  /** Solo practice table — a bot fills the other seat and the match starts right away. */
+  playBot: () => void;
   leave: (tableId: string) => void;
   setName: (name: string) => void;
   clearMatchNav: () => void;
@@ -104,6 +106,27 @@ export const useLobbyStore = create<LobbyState>((set, get) => ({
         status: "За столом — откройте вторую вкладку и нажмите «Играть»",
       });
     });
+  },
+  playBot: () => {
+    const s = getSocket();
+    if (!s.connected) {
+      set({ status: "Нет связи — запустите сервер" });
+      return;
+    }
+    set({ status: "Готовим стол с ботом…" });
+    s.emit(
+      "lobby:practice",
+      (res: { error?: string; ok?: boolean; tableId?: string }) => {
+        if (res?.error) {
+          set({ status: errText(res.error) });
+          return;
+        }
+        set({
+          seatedTableId: res.tableId ?? null,
+          status: null,
+        });
+      },
+    );
   },
   leave: (tableId) => {
     getSocket().emit("lobby:leave", { tableId });
