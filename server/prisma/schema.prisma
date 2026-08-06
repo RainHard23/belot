@@ -86,3 +86,16 @@ model DepositOrder {
 
   @@index([userId, status])
 }
+
+/// Durable live-match snapshot so a server restart can resume cash pots.
+model MatchSnapshot {
+  id             String   @id
+  tableId        String
+  payload        Json
+  turnDeadlineAt BigInt?
+  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now())
+
+  @@index([tableId])
+}
+

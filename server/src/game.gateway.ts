@@ -27,6 +27,8 @@ import { SlidingWindowLimiter } from "./rate-limiter";
 
 const EMOTE_WINDOW_MS = 10_000;
 const EMOTE_MAX_PER_WINDOW = 5;
+/** Refresh / network blip grace before forfeit (was 8s — too aggressive for cash). */
+const DISCONNECT_GRACE_MS = 60_000;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
@@ -100,10 +102,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
               matchId: table.matchId,
               tableId: table.id,
             });
-            this.turnTimer.schedule(table.matchId, this.server);
+            this.turnTimer.schedule(table.matchId, this.server, { preserveDeadline: true });
             this.matches.broadcast(table.matchId, this.server, { snap: true });
           }
-          else {
+          else if (!match) {
+            // Stale pointer after crash/end — don't touch a live match we're not in.
             this.lobby.setMatch(table.id, null);
           }
         }
@@ -130,7 +133,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (room && room.size > 0)
         return;
       void this.teardownSession(sessionId);
-    }, 8_000);
+    }, DISCONNECT_GRACE_MS);
     this.disconnectTimers.set(sessionId, timer);
   }
 
@@ -139,15 +142,38 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (match) {
       this.bot.cancel(match.id);
       this.turnTimer.cancel(match.id);
-      await this.handleForfeit(match, sessionId);
-      this.matches.notifyOpponentLeft(match.id, sessionId, this.server);
-      this.lobby.setMatch(match.tableId, null);
+      const winner = this.matches.matchWinner(match);
+      if (winner) {
+        if (!match.settled)
+          await this.ensureMatchSettled(match);
+        for (const s of match.seats) {
+          if (s.sessionId === sessionId)
+            continue;
+          this.server.to(`session:${s.sessionId}`).emit("match:ended", {
+            matchId: match.id,
+            reason: "ended",
+          });
+        }
+        this.matches.endMatch(match.id);
+      }
+      else {
+        if (!match.settled) {
+          await this.handleForfeit(match, sessionId);
+          if (!match.settled && !match.practice && match.pot > 0)
+            await this.emergencyRefundMatch(match);
+        }
+        this.matches.notifyOpponentLeft(match.id, sessionId, this.server);
+      }
+      this.lobby.releaseTable(match.tableId);
     }
+
+    const waiting = this.lobby.findBySession(sessionId);
+    if (waiting && !waiting.matchId)
+      await this.refundIfPaidNoMatch(waiting.id, sessionId);
+
     const touched = this.lobby.leaveAll(sessionId);
-    for (const tableId of touched) {
-      await this.refundIfPaidNoMatch(tableId, sessionId);
+    for (const tableId of touched)
       this.vacateBotIfAlone(tableId);
-    }
     this.emoteLimiter.reset(sessionId);
     this.server.emit("lobby:tables", this.lobby.list());
   }
@@ -197,48 +223,91 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!table)
       return { error: "table_not_found" };
 
-    const preview = this.lobby.sit(body.tableId, sessionId, session.name, session.userId);
-    if ("error" in preview)
-      return preview;
+    // Already seated at this table — refresh seat metadata, no re-debit.
+    const existingIdx = table.seats.findIndex(s => s?.sessionId === sessionId);
+    if (existingIdx < 0) {
+      if (table.matchId)
+        return { error: "match_in_progress" };
+      const free = table.seats.findIndex(s => s === null);
+      if (free < 0)
+        return { error: "table_full" };
 
-    // Charge buy-in only on first seat at this table
-    if (preview.newlySeated && table.buyIn > 0 && session.userId) {
-      try {
-        await this.wallet.debit({
-          userId: session.userId,
-          amount: table.buyIn,
-          type: "buyin",
-          idempotencyKey: `buyin:${body.tableId}:${sessionId}`,
-          refType: "table",
-          refId: body.tableId,
-        });
-        this.lobby.markPaid(body.tableId, sessionId);
-      }
-      catch {
-        this.lobby.leave(body.tableId, sessionId);
-        return { error: "insufficient_funds" };
+      // Charge *before* seating so a crash cannot leave an unpaid seated player.
+      if (table.buyIn > 0 && session.userId) {
+        const buyInToken = this.lobby.ensureBuyInToken(body.tableId, sessionId);
+        if (!buyInToken)
+          return { error: "table_not_found" };
+        try {
+          await this.wallet.debit({
+            userId: session.userId,
+            amount: table.buyIn,
+            type: "buyin",
+            idempotencyKey: `buyin:${body.tableId}:${sessionId}:${buyInToken}`,
+            refType: "table",
+            refId: body.tableId,
+          });
+        }
+        catch {
+          this.lobby.clearPaid(body.tableId, sessionId);
+          return { error: "insufficient_funds" };
+        }
       }
     }
+
+    const preview = this.lobby.sit(body.tableId, sessionId, session.name, session.userId);
+    if ("error" in preview) {
+      // Rare: seat lost between check and sit after debit — refund.
+      if (existingIdx < 0 && table.buyIn > 0 && session.userId) {
+        const token = this.lobby.ensureBuyInToken(body.tableId, sessionId);
+        try {
+          if (token) {
+            await this.wallet.credit({
+              userId: session.userId,
+              amount: table.buyIn,
+              type: "refund",
+              idempotencyKey: `refund:sitfail:${body.tableId}:${sessionId}:${token}`,
+              refType: "table",
+              refId: body.tableId,
+            });
+            this.lobby.clearPaid(body.tableId, sessionId);
+          }
+        }
+        catch (err) {
+          console.error("sit-fail refund failed", err);
+        }
+      }
+      return preview;
+    }
+
+    if (preview.newlySeated && table.buyIn > 0 && session.userId)
+      this.lobby.markPaid(body.tableId, sessionId);
 
     client.join(`table:${body.tableId}`);
     this.server.emit("lobby:tables", this.lobby.list());
 
     const filled = preview.table.seats.filter(Boolean).length;
     if (filled === 2 && !preview.table.matchId) {
-      const match = this.matches.createFromTable(preview.table, {
-        practice: false,
-        target: preview.table.target,
-      });
-      this.lobby.setMatch(body.tableId, match.id);
-      const payload = { matchId: match.id, tableId: body.tableId };
-      this.server.to(`table:${body.tableId}`).emit("match:start", payload);
-      for (const seat of preview.table.seats) {
-        if (seat)
-          this.server.to(`session:${seat.sessionId}`).emit("match:start", payload);
+      const humans = preview.table.seats.filter(
+        (s): s is NonNullable<typeof s> => s !== null && !isBotSession(s.sessionId),
+      );
+      const allPaid = table.buyIn <= 0
+        || humans.every(s => this.lobby.wasPaid(body.tableId!, s.sessionId));
+      if (allPaid) {
+        const match = this.matches.createFromTable(preview.table, {
+          practice: false,
+          target: preview.table.target,
+        });
+        this.lobby.setMatch(body.tableId, match.id);
+        const payload = { matchId: match.id, tableId: body.tableId };
+        this.server.to(`table:${body.tableId}`).emit("match:start", payload);
+        for (const seat of preview.table.seats) {
+          if (seat)
+            this.server.to(`session:${seat.sessionId}`).emit("match:start", payload);
+        }
+        this.turnTimer.schedule(match.id, this.server);
+        this.matches.broadcast(match.id, this.server);
+        this.bot.poke(match.id, this.server);
       }
-      this.turnTimer.schedule(match.id, this.server);
-      this.matches.broadcast(match.id, this.server);
-      this.bot.poke(match.id, this.server);
     }
 
     return {
@@ -264,8 +333,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if ("error" in sitResult)
       return sitResult;
     const botResult = this.lobby.sitBot(openTable.id);
-    if ("error" in botResult)
+    if ("error" in botResult) {
+      this.lobby.leave(openTable.id, sessionId);
       return botResult;
+    }
 
     client.join(`table:${openTable.id}`);
     this.server.emit("lobby:tables", this.lobby.list());
@@ -300,17 +371,39 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const match = this.matches.get(matchId);
       this.bot.cancel(matchId);
       this.turnTimer.cancel(matchId);
-      if (match)
-        await this.handleForfeit(match, sessionId);
-      this.matches.notifyOpponentLeft(matchId, sessionId, this.server);
-      this.lobby.setMatch(body.tableId, null);
+      const winner = match ? this.matches.matchWinner(match) : null;
+      if (match && winner) {
+        // Match already decided — settle if needed, then tear down quietly.
+        // Still notify the other seat so their lobby seat state clears.
+        if (!match.settled)
+          await this.ensureMatchSettled(match);
+        for (const s of match.seats) {
+          if (s.sessionId === sessionId)
+            continue;
+          this.server.to(`session:${s.sessionId}`).emit("match:ended", {
+            matchId,
+            reason: "ended",
+          });
+        }
+        this.matches.endMatch(matchId);
+      }
+      else if (match) {
+        // Mid-match leave → forfeit + tell remaining player (even if settle set settled).
+        if (!match.settled) {
+          await this.handleForfeit(match, sessionId);
+          if (!match.settled && !match.practice && match.pot > 0)
+            await this.emergencyRefundMatch(match);
+        }
+        this.matches.notifyOpponentLeft(matchId, sessionId, this.server);
+      }
+      this.lobby.releaseTable(body.tableId);
     }
     else {
       await this.refundIfPaidNoMatch(body.tableId, sessionId);
+      this.lobby.leave(body.tableId, sessionId);
+      this.vacateBotIfAlone(body.tableId);
     }
 
-    this.lobby.leave(body.tableId, sessionId);
-    this.vacateBotIfAlone(body.tableId);
     client.leave(`table:${body.tableId}`);
     this.server.emit("lobby:tables", this.lobby.list());
     return { ok: true };
@@ -332,7 +425,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     client.join(`session:${sessionId}`);
     client.join(`match:${body.matchId}`);
-    this.turnTimer.schedule(body.matchId, this.server);
+    this.turnTimer.schedule(body.matchId, this.server, { preserveDeadline: true });
     this.matches.broadcast(body.matchId, this.server, { snap: true });
     return { ok: true };
   }
@@ -413,53 +506,134 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   /** Mid-match leave: remaining human wins pot (90/10). */
   private async handleForfeit(match: ServerMatch, leaverSessionId: string) {
+    // Wait out an in-flight settle so we don't race into emergencyRefundMatch.
+    const waitStart = Date.now();
+    while (match.settling && Date.now() - waitStart < 8_000)
+      await new Promise(r => setTimeout(r, 50));
+
     if (match.settled || match.practice || match.pot <= 0) {
       match.settled = true;
+      this.lobby.clearAllPaid(match.tableId);
       return;
     }
     const winner = match.seats.find(
       s => s.sessionId !== leaverSessionId && !isBotSession(s.sessionId),
     );
-    if (!winner?.userId) {
-      for (const s of match.seats) {
-        if (s.userId && !isBotSession(s.sessionId) && match.buyIn > 0) {
-          try {
-            await this.wallet.credit({
-              userId: s.userId,
-              amount: match.buyIn,
-              type: "refund",
-              idempotencyKey: `refund:forfeit:${match.id}:${s.sessionId}`,
-              refType: "match",
-              refId: match.id,
-            });
-          }
-          catch (err) {
-            console.error("refund failed", err);
+    match.settling = true;
+    try {
+      if (!winner?.userId) {
+        for (const s of match.seats) {
+          if (s.userId && !isBotSession(s.sessionId) && match.buyIn > 0) {
+            try {
+              await this.wallet.credit({
+                userId: s.userId,
+                amount: match.buyIn,
+                type: "refund",
+                idempotencyKey: `refund:forfeit:${match.id}:${s.sessionId}`,
+                refType: "match",
+                refId: match.id,
+              });
+            }
+            catch (err) {
+              console.error("refund failed", err);
+            }
           }
         }
       }
+      else {
+        await this.wallet.settleMatch({
+          matchId: match.id,
+          pot: match.pot,
+          winnerUserId: winner.userId,
+        });
+      }
       match.settled = true;
-      return;
-    }
-    match.settled = true;
-    try {
-      await this.wallet.settleMatch({
-        matchId: match.id,
-        pot: match.pot,
-        winnerUserId: winner.userId,
-      });
+      this.lobby.clearAllPaid(match.tableId);
     }
     catch (err) {
       console.error("forfeit settle failed", err);
-      match.settled = false;
+      // Don't mark settled — emergencyRefundMatch checks hasMatchPayout first.
     }
+    finally {
+      match.settling = false;
+    }
+  }
+
+  /** Finish points/bolts payout before tearing the match down. */
+  private async ensureMatchSettled(match: ServerMatch) {
+    const waitStart = Date.now();
+    while (match.settling && Date.now() - waitStart < 8_000)
+      await new Promise(r => setTimeout(r, 50));
+
+    if (match.settled || match.practice || match.pot <= 0) {
+      match.settled = true;
+      this.lobby.clearAllPaid(match.tableId);
+      return;
+    }
+    const winner = this.matches.matchWinner(match);
+    if (!winner)
+      return;
+    const winnerSeat = match.seats.find(s => s.seat === winner.seat);
+    match.settling = true;
+    try {
+      if (winnerSeat?.userId && !isBotSession(winnerSeat.sessionId)) {
+        await this.wallet.settleMatch({
+          matchId: match.id,
+          pot: match.pot,
+          winnerUserId: winnerSeat.userId,
+        });
+      }
+      match.settled = true;
+      this.lobby.clearAllPaid(match.tableId);
+    }
+    catch (err) {
+      console.error("ensureMatchSettled failed", err);
+      if (!(await this.wallet.hasMatchPayout(match.id)))
+        await this.emergencyRefundMatch(match);
+      else {
+        match.settled = true;
+        this.lobby.clearAllPaid(match.tableId);
+      }
+    }
+    finally {
+      match.settling = false;
+    }
+  }
+
+  /** Last-resort: return buy-ins only when no winner payout was written. */
+  private async emergencyRefundMatch(match: ServerMatch) {
+    if (await this.wallet.hasMatchPayout(match.id)) {
+      match.settled = true;
+      this.lobby.clearAllPaid(match.tableId);
+      return;
+    }
+    for (const s of match.seats) {
+      if (!s.userId || isBotSession(s.sessionId) || match.buyIn <= 0)
+        continue;
+      try {
+        await this.wallet.credit({
+          userId: s.userId,
+          amount: match.buyIn,
+          type: "refund",
+          idempotencyKey: `refund:emergency:${match.id}:${s.sessionId}`,
+          refType: "match",
+          refId: match.id,
+        });
+      }
+      catch (err) {
+        console.error("emergency refund failed", err);
+      }
+    }
+    match.settled = true;
+    this.lobby.clearAllPaid(match.tableId);
   }
 
   private async refundIfPaidNoMatch(tableId: string, sessionId: string) {
     const table = this.lobby.get(tableId);
     if (!table || table.matchId)
       return;
-    if (!this.lobby.wasPaid(tableId, sessionId))
+    const token = this.lobby.claimPaidForRefund(tableId, sessionId);
+    if (!token)
       return;
     const session = this.sessions.get(sessionId);
     if (!session?.userId || table.buyIn <= 0)
@@ -469,14 +643,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         userId: session.userId,
         amount: table.buyIn,
         type: "refund",
-        idempotencyKey: `refund:leave:${tableId}:${sessionId}`,
+        idempotencyKey: `refund:leave:${tableId}:${token}`,
         refType: "table",
         refId: tableId,
       });
     }
     catch (err) {
       console.error("leave refund failed", err);
+      // Re-arm with the *same* token so a retry keeps the idempotency key.
+      this.lobby.markPaid(tableId, sessionId, token);
     }
-    this.lobby.clearPaid(tableId, sessionId);
   }
 }

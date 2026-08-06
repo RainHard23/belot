@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
@@ -8,6 +8,8 @@ import { ASSETS } from "@/ui/assets";
 import { ru } from "@/ui/i18n/ru";
 
 const PRESETS = [10, 25, 50, 100, 500];
+const MIN = 1;
+const MAX = 10_000;
 
 export function DepositModal({
   open,
@@ -22,11 +24,28 @@ export function DepositModal({
   const error = useAuthStore(s => s.error);
   const clearError = useAuthStore(s => s.clearError);
   const balance = useAuthStore(s => s.user?.balance ?? 0);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open)
+      return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape")
+        onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    panelRef.current?.querySelector<HTMLElement>("input,button")?.focus();
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  const clamped = Math.min(MAX, Math.max(MIN, Math.floor(amount) || 0));
 
   const submit = async () => {
     clearError();
+    if (clamped < MIN || clamped > MAX)
+      return;
     try {
-      await depositMock(amount);
+      await depositMock(clamped);
       onClose();
     }
     catch {
@@ -42,6 +61,9 @@ export function DepositModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
+          role="dialog"
+          aria-modal="true"
+          aria-label={ru.depositTitle}
         >
           <button
             type="button"
@@ -50,6 +72,7 @@ export function DepositModal({
             onClick={onClose}
           />
           <motion.div
+            ref={panelRef}
             initial={{ opacity: 0, y: 20, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12, scale: 0.97 }}
@@ -105,8 +128,8 @@ export function DepositModal({
                 </span>
                 <Input
                   type="number"
-                  min={1}
-                  max={10000}
+                  min={MIN}
+                  max={MAX}
                   value={amount}
                   onChange={e => setAmount(Number(e.target.value) || 0)}
                   className="h-12 rounded-[14px] text-base tabular-nums"
@@ -126,10 +149,10 @@ export function DepositModal({
                 <Button
                   variant="default"
                   size="lg"
-                  disabled={busy || amount < 1}
+                  disabled={busy || clamped < MIN || clamped > MAX}
                   onClick={() => void submit()}
                 >
-                  {busy ? "…" : `${ru.depositConfirm} · ${amount}`}
+                  {busy ? "…" : `${ru.depositConfirm} · ${clamped}`}
                 </Button>
               </div>
             </div>

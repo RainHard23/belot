@@ -4,22 +4,22 @@
 
 ## Запуск (для друга — одна кнопка)
 
-1. Один раз установите [Node.js LTS](https://nodejs.org) и [Docker Desktop](https://www.docker.com/products/docker-desktop/).
-2. В корне проекта: `docker compose up -d postgres` (БД на порту **5433**).
-3. Один раз настройте сервер:
-   ```bash
-   cd server
-   cp ../.env.example .env   # или используйте уже созданный server/.env
-   npm install
-   npx prisma migrate deploy
-   npm run prisma:seed
-   ```
-4. Дважды кликните `ЗАПУСК.bat` / `ЗАПУСК.command`.
-5. Остановка: `СТОП.bat` / `СТОП.command`.
+1. Один раз установите [Node.js LTS](https://nodejs.org) и [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Docker должен быть запущен).
+2. Дважды кликните `START.bat` (Windows) или `START.command` (Mac).
+   Скрипт сам: поднимет Postgres, поставит зависимости, прогонит миграции,
+   создаст пользователя **admin / admin**, откроет браузер.
+3. Остановка: `STOP.bat` / `STOP.command`.
+
+Вход: **admin** / **admin**. Бот: кнопка «Играть с ботом» в лобби (без денег).
+
+Отправить другу архив без `node_modules`: кликните `PACK.bat`
+→ рядом с папкой проекта появится `belote-for-friend.zip`.
+Подробности — в `HOW-TO-RUN.txt` / `КАК ЗАПУСТИТЬ.txt`.
 
 - Клиент: http://localhost:5173  
 - Сервер: http://localhost:3001  
 - Health: http://localhost:3001/health  
+- Postgres: localhost:**5433**
 
 ## Запуск (для разработчика)
 

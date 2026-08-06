@@ -1,6 +1,7 @@
 import type { Server } from "socket.io";
 import type { BidAction, MatchAnimEvent, MatchState, Seat } from "../../../shared/game";
 import type { LobbyTable } from "../lobby/lobby.service";
+import type { PersistedMatchPayload } from "./match-persist";
 import { randomUUID } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import {
@@ -12,6 +13,7 @@ import {
   startHand,
 } from "../../../shared/game";
 import { isBotSession } from "../lobby/lobby.service";
+import { deleteMatchSnapshot, saveMatchSnapshot } from "./match-persist";
 
 export interface ServerMatch {
   id: string;
@@ -24,6 +26,8 @@ export interface ServerMatch {
   pot: number;
   practice: boolean;
   settled: boolean;
+  /** In-flight wallet settle — prevents double payout + premature snapshot delete. */
+  settling?: boolean;
 }
 
 function cloneState(state: MatchState): MatchState {
@@ -38,6 +42,7 @@ export class MatchService {
   private bySession = new Map<string, string>();
   private deadlineProvider: ((matchId: string) => number | null) | null = null;
   private settleHook: ((match: ServerMatch) => void | Promise<void>) | null = null;
+  private persistMeta: ((match: ServerMatch) => { tableName?: string; paidSessionIds?: string[] }) | null = null;
 
   setDeadlineProvider(fn: (matchId: string) => number | null) {
     this.deadlineProvider = fn;
@@ -45,6 +50,10 @@ export class MatchService {
 
   setSettleHook(fn: (match: ServerMatch) => void | Promise<void>) {
     this.settleHook = fn;
+  }
+
+  setPersistMeta(fn: (match: ServerMatch) => { tableName?: string; paidSessionIds?: string[] }) {
+    this.persistMeta = fn;
   }
 
   createFromTable(
@@ -87,6 +96,30 @@ export class MatchService {
     };
     this.matches.set(match.id, match);
     for (const s of seats) this.bySession.set(s.sessionId, match.id);
+    void this.persist(match);
+    return match;
+  }
+
+  /** Rehydrate a cash match after process restart. */
+  hydrate(payload: PersistedMatchPayload): ServerMatch | null {
+    if (payload.practice || payload.settled)
+      return null;
+    if (this.matches.has(payload.id))
+      return this.matches.get(payload.id)!;
+    const match: ServerMatch = {
+      id: payload.id,
+      tableId: payload.tableId,
+      seats: payload.seats,
+      state: payload.state,
+      prevState: cloneState(payload.state),
+      target: payload.target,
+      buyIn: payload.buyIn,
+      pot: payload.pot,
+      practice: false,
+      settled: false,
+    };
+    this.matches.set(match.id, match);
+    for (const s of match.seats) this.bySession.set(s.sessionId, match.id);
     return match;
   }
 
@@ -109,6 +142,7 @@ export class MatchService {
       return;
     for (const s of match.seats) this.bySession.delete(s.sessionId);
     this.matches.delete(matchId);
+    void deleteMatchSnapshot(matchId);
   }
 
   broadcast(matchId: string, server: Server, opts?: { snap?: boolean }) {
@@ -152,6 +186,21 @@ export class MatchService {
     }
 
     match.prevState = cloneState(match.state);
+    void this.persist(match);
+  }
+
+  private persist(match: ServerMatch) {
+    // Keep snapshot while payout is in flight — crash mid-settle must not
+    // vaporize a live pot (settled flips only after wallet success).
+    if (match.practice || match.settled) {
+      void deleteMatchSnapshot(match.id);
+      return;
+    }
+    if (match.settling)
+      return;
+    const meta = this.persistMeta?.(match);
+    const deadline = this.deadlineProvider?.(match.id) ?? null;
+    void saveMatchSnapshot(match, deadline, meta);
   }
 
   matchWinner(match: ServerMatch): { seat: Seat; reason: "points" | "bolts" } | null {
@@ -220,6 +269,19 @@ export class MatchService {
       return { error: "no_match" };
     if (!this.seatOf(match, sessionId))
       return { error: "not_seated" };
+    if (this.matchWinner(match))
+      return { error: "match_over" };
+    if (match.state.phase !== "handEnd")
+      return { error: "wrong_phase" };
+    match.state = startHand(match.state);
+    return { ok: true as const };
+  }
+
+  /** Server-driven advance (handEnd timeout) — no session gate. */
+  forceNextHand(matchId: string) {
+    const match = this.matches.get(matchId);
+    if (!match)
+      return { error: "no_match" };
     if (this.matchWinner(match))
       return { error: "match_over" };
     if (match.state.phase !== "handEnd")

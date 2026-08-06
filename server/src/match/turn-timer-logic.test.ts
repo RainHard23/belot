@@ -20,12 +20,47 @@ describe("decideTimeout", () => {
     });
   });
 
-  it("auto-passes during round-2 bidding (never picks a trump for you)", () => {
-    const state = baseState({ phase: "bidding2" });
-    expect(decideTimeout(state, "p1")).toEqual({
+  it("auto-passes during round-2 for the non-dealer", () => {
+    const state = baseState({
+      phase: "bidding2",
+      firstSpeaker: "p0",
+      bidding: {
+        round: 2,
+        faceUpSuit: "hearts",
+        turn: "p0",
+        passes: 0,
+        taker: null,
+        trump: null,
+      },
+    });
+    expect(decideTimeout(state, "p0")).toEqual({
       kind: "bid",
       action: { type: "pass" },
     });
+  });
+
+  it("auto-chooses a suit on round-2 when the dealer must name trump", () => {
+    const state = baseState({
+      phase: "bidding2",
+      firstSpeaker: "p0",
+      dealer: "p1",
+      bidding: {
+        round: 2,
+        faceUpSuit: "hearts",
+        turn: "p1",
+        passes: 1,
+        taker: null,
+        trump: null,
+      },
+    });
+    const decision = decideTimeout(state, "p1", () => 0);
+    expect(decision.kind).toBe("bid");
+    if (decision.kind === "bid") {
+      expect(decision.action.type).toBe("choose");
+      if (decision.action.type === "choose") {
+        expect(decision.action.suit).not.toBe("hearts");
+      }
+    }
   });
 
   it("plays a legal card when the phase is playing", () => {

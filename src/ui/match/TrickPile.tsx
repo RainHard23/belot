@@ -1,7 +1,15 @@
 import { motion } from "motion/react";
 import { CardBack } from "@/ui/cards/CardBack";
+import { ru } from "@/ui/i18n/ru";
 
-/** Small stack of won tricks near a seat — grows as tricks are collected. */
+/** Match PlayingCard `md` / deck so отбой reads as won cards. */
+const PILE_W = "clamp(58px, 8vw, 78px)";
+const PILE_ASPECT = "240 / 336";
+
+/**
+ * Won-trick discard (отбой) for one seat — two piles, as in real Belote.
+ * Empty piles stay invisible (no dashed outline); labels show once cards land.
+ */
 export function TrickPile({
   count,
   side,
@@ -11,39 +19,59 @@ export function TrickPile({
   side: "left" | "right";
   pulse?: boolean;
 }) {
-  if (count === 0)
-    return null;
-
-  const shown = Math.min(count, 5);
+  const shown = Math.min(Math.max(count, 0), 8);
+  if (count <= 0) {
+    return (
+      <div
+        data-otboy={side === "left" ? "opp" : "you"}
+        className={`pointer-events-none absolute z-20 -translate-y-1/2 ${
+          side === "left"
+            ? "left-[12%] top-[20%]"
+            : "right-[12%] top-[74%]"
+        }`}
+        style={{ width: PILE_W, aspectRatio: PILE_ASPECT }}
+      />
+    );
+  }
 
   return (
-    <div className={`pointer-events-none absolute ${side === "left" ? "left-[3%]" : "right-[3%]"} top-1/2 -translate-y-1/2`}>
+    <div
+      data-otboy={side === "left" ? "opp" : "you"}
+      className={`pointer-events-none absolute z-20 flex -translate-y-1/2 flex-col items-center gap-1.5 ${
+        side === "left"
+          ? "left-[12%] top-[20%]"
+          : "right-[12%] top-[74%]"
+      }`}
+    >
       <motion.div
-        className="relative"
-        style={{ width: 34, height: 48 }}
-        animate={pulse ? { scale: [1, 1.14, 1] } : undefined}
+        className="relative drop-shadow-[0_12px_22px_rgba(0,0,0,0.5)]"
+        style={{ width: PILE_W, aspectRatio: PILE_ASPECT }}
+        animate={pulse ? { scale: [1, 1.12, 1] } : undefined}
         transition={{ duration: 0.45 }}
       >
-        {Array.from({ length: shown }).map((_, i) => (
+        {Array.from({ length: Math.max(shown, 1) }).map((_, i) => (
           <div
             key={i}
-            className="absolute overflow-hidden rounded-[5px] shadow-[0_4px_10px_rgba(0,0,0,0.5)]"
+            className="absolute inset-0 overflow-hidden rounded-[10px] ring-1 ring-black/40"
             style={{
-              width: 34,
-              height: 48,
-              top: -i * 1.6,
-              left: i * 1.2,
+              transform: `translate(${i * 3}px, ${-i * 3.2}px)`,
               zIndex: i,
-              filter: pulse && i === shown - 1 ? "drop-shadow(0 0 8px rgba(251,158,29,0.6))" : undefined,
+              filter: pulse && i === shown - 1
+                ? "drop-shadow(0 0 10px rgba(251,158,29,0.65))"
+                : undefined,
             }}
           >
             <CardBack />
           </div>
         ))}
-        <span className="absolute -bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] font-bold text-[var(--accent)]">
-          {count}
-        </span>
       </motion.div>
+      <span className="rounded-full border border-white/10 bg-black/75 px-2 py-0.5 text-[10px] font-bold tracking-wide text-white/80 backdrop-blur">
+        {ru.discard}
+        {" "}
+        ·
+        {" "}
+        {count}
+      </span>
     </div>
   );
 }

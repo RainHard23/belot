@@ -11,10 +11,10 @@ import { cn } from "@/lib/cn";
  */
 const actionButtonVariants = cva(
   [
-    "relative inline-flex select-none items-center justify-center gap-1.5",
+    "relative inline-flex cursor-pointer select-none items-center justify-center gap-1.5",
     "whitespace-nowrap rounded-[14px] font-bold transition-[transform,box-shadow,opacity]",
     "active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-ring)]",
-    "disabled:pointer-events-none disabled:opacity-40",
+    "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-40",
   ].join(" "),
   {
     variants: {
@@ -29,10 +29,11 @@ const actionButtonVariants = cva(
           "border border-white/10 bg-[var(--surface-2)] text-white",
           "hover:border-[var(--accent)]/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]",
         ].join(" "),
-        /** Pass / decline. */
+        /** Pass / decline — secondary but clearly pressable (not muted/disabled). */
         pass: [
-          "border border-white/10 text-[var(--muted)] hover:text-white",
-          "hover:border-white/20",
+          "border border-white/25 bg-gradient-to-b from-[#3a3a44] to-[#25252e] text-white",
+          "shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_8px_18px_rgba(0,0,0,0.35)]",
+          "hover:border-white/40 hover:from-[#454552] hover:to-[#2c2c36]",
         ].join(" "),
         /** Primary call to action (next hand, confirm). */
         primary: [
@@ -88,8 +89,9 @@ export function IconButton({
       aria-label={label}
       title={label}
       className={cn(
-        "flex size-9 items-center justify-center rounded-[12px] border transition",
+        "flex size-9 cursor-pointer items-center justify-center rounded-[12px] border transition",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-ring)]",
+        "disabled:cursor-not-allowed disabled:opacity-40",
         active
           ? "border-[var(--accent)]/60 bg-[var(--accent-soft)] text-[var(--accent-strong)]"
           : "border-white/[0.08] bg-black/40 text-white/70 hover:bg-white/[0.06] hover:text-white",

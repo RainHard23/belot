@@ -46,12 +46,15 @@ export function AppHeader({
         {onDeposit && (
           <Button
             variant="default"
-            className="hidden h-[42px] rounded-[14px] px-4 sm:inline-flex"
+            className="h-[42px] rounded-[14px] px-3 sm:px-4"
             onClick={onDeposit}
           >
-            +
-            {" "}
-            {ru.deposit}
+            <span className="sm:hidden">+</span>
+            <span className="hidden sm:inline">
+              +
+              {" "}
+              {ru.deposit}
+            </span>
           </Button>
         )}
         <button

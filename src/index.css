@@ -485,4 +485,15 @@ body {
 
 button {
   font: inherit;
+  cursor: pointer;
+}
+
+button:disabled,
+button[disabled],
+button[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
 }

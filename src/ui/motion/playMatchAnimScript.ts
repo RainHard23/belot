@@ -11,6 +11,8 @@ export interface MatchDisplay {
   highlightIds: string[];
   /** Opponent backs currently shown (may animate up) */
   oppShown: number;
+  /** Cards still in the table stock pile (backs). Shrinks as packets fly out. */
+  stockShown: number;
   /** Bid panel visible after face-up + deal */
   bidVisible: boolean;
   /** Trick held on table during collect (server already cleared) */
@@ -27,6 +29,7 @@ export function emptyDisplay(): MatchDisplay {
     faceDownIds: [],
     highlightIds: [],
     oppShown: 0,
+    stockShown: 0,
     bidVisible: false,
     heldTrick: null,
     collectTo: null,
@@ -61,6 +64,7 @@ export function playMatchAnimScript(opts: {
       faceDownIds: [],
       highlightIds: [],
       oppShown: nextView.opponentCount,
+      stockShown: nextView.stockCount,
       bidVisible: nextView.phase === "bidding1" || nextView.phase === "bidding2",
       heldTrick: null,
       collectTo: null,
@@ -77,6 +81,7 @@ export function playMatchAnimScript(opts: {
         faceDownIds: [],
         highlightIds: [],
         oppShown: nextView.opponentCount,
+        stockShown: nextView.stockCount,
         bidVisible: nextView.phase === "bidding1" || nextView.phase === "bidding2",
         heldTrick: null,
         collectTo: null,
@@ -87,16 +92,22 @@ export function playMatchAnimScript(opts: {
     return;
   }
 
-  onBusy?.(true);
-  setDisplay({ animBusy: true });
-
+  const gen = matchAnimQueue.generation();
   matchAnimQueue.enqueue(async () => {
+    if (gen !== matchAnimQueue.generation())
+      return;
+    setDisplay({ animBusy: true });
+    onBusy?.(true);
+    const alive = () => gen === matchAnimQueue.generation();
+    try {
     let working: PlayerView = {
       ...nextView,
       // Start from progressive reveal where possible
     };
 
     for (const event of anim) {
+      if (!alive())
+        return;
       switch (event.type) {
         case "clear_table": {
           setDisplay(d => ({
@@ -108,11 +119,13 @@ export function playMatchAnimScript(opts: {
                   faceUp: null,
                   trick: [],
                   declarations: [],
+                  stockCount: 24,
                 }
               : null,
             faceDownIds: [],
             highlightIds: [],
             oppShown: 0,
+            stockShown: 24,
             bidVisible: false,
             heldTrick: null,
             collectTo: null,
@@ -126,36 +139,40 @@ export function playMatchAnimScript(opts: {
           emitAmbient("deal");
           const ids = event.cards.map(c => c.id);
           if (event.kind === "initial") {
-            // Show backs first, then flip stagger
-            setDisplay(d => ({
-              view: {
-                ...nextView,
-                hand: event.cards,
-                opponentCount: d.oppShown,
-                faceUp: null,
-                trick: [],
-                phase: nextView.phase,
-              },
-              faceDownIds: ids,
-              highlightIds: [],
-              bidVisible: false,
-            }));
-            await sleep(120);
+            // Append this 3-card packet onto whatever is already revealed.
+            setDisplay((d) => {
+              const prevHand = d.view?.hand ?? [];
+              const merged = mergeUnique(prevHand, event.cards);
+              return {
+                view: {
+                  ...(d.view ?? nextView),
+                  hand: merged,
+                  opponentCount: d.oppShown,
+                  faceUp: null,
+                  trick: [],
+                  phase: nextView.phase,
+                  stockCount: Math.max(0, d.stockShown - ids.length),
+                },
+                faceDownIds: [...(d.faceDownIds ?? []), ...ids],
+                highlightIds: [],
+                bidVisible: false,
+                stockShown: Math.max(0, d.stockShown - ids.length),
+              };
+            });
+            await sleep(90);
             for (let i = 0; i < ids.length; i++) {
-              const revealed = ids.slice(0, i + 1);
-              setDisplay({
-                faceDownIds: ids.filter(id => !revealed.includes(id)),
-              });
-              await sleep(70);
+              setDisplay(d => ({
+                faceDownIds: d.faceDownIds.filter(id => id !== ids[i]),
+              }));
+              await sleep(55);
             }
-            setDisplay({ faceDownIds: [] });
-            await sleep(80);
+            await sleep(40);
           }
           else {
-            // +3 / rest — short second deal
+            // Rest deal after trump — short second deal from stock.
             const before = working.hand ?? [];
             const merged = mergeUnique(before, event.cards);
-            setDisplay({
+            setDisplay(d => ({
               view: {
                 ...nextView,
                 hand: merged,
@@ -164,7 +181,8 @@ export function playMatchAnimScript(opts: {
               highlightIds: ids,
               faceDownIds: ids,
               bidVisible: false,
-            });
+              stockShown: Math.max(0, d.stockShown - ids.length),
+            }));
             await sleep(100);
             for (let i = 0; i < ids.length; i++) {
               setDisplay({
@@ -180,23 +198,31 @@ export function playMatchAnimScript(opts: {
         }
         case "opp_deal": {
           emitAmbient("deal");
-          const step = event.kind === "initial" ? 55 : 50;
-          for (let n = event.from; n <= event.to; n++) {
+          const nCards = event.to - event.from;
+          setDisplay(d => ({
+            stockShown: Math.max(0, d.stockShown - nCards),
+          }));
+          const step = event.kind === "initial" ? 50 : 50;
+          for (let n = event.from + 1; n <= event.to; n++) {
             setDisplay({ oppShown: n });
             await sleep(step);
           }
+          setDisplay({ oppShown: event.to });
           break;
         }
         case "face_up_show": {
-          setDisplay({
+          // Face-up mounts on #table-deck-anchor (DeckStack), not table center.
+          setDisplay(d => ({
             view: {
               ...nextView,
-              hand: nextView.hand.length ? nextView.hand : (working.hand ?? []),
+              hand: nextView.hand.length ? (d.view?.hand ?? nextView.hand) : (working.hand ?? []),
               faceUp: event.card,
-              opponentCount: nextView.opponentCount,
+              opponentCount: d.oppShown,
+              stockCount: Math.max(0, d.stockShown - 1),
             },
-          });
-          await sleep(380);
+            stockShown: Math.max(0, d.stockShown - 1),
+          }));
+          await sleep(420);
           break;
         }
         case "face_up_hide": {
@@ -284,6 +310,7 @@ export function playMatchAnimScript(opts: {
           setDisplay({
             view: nextView,
             oppShown: nextView.opponentCount,
+            stockShown: nextView.stockCount,
             faceDownIds: [],
             highlightIds: [],
             bidVisible: nextView.phase === "bidding1" || nextView.phase === "bidding2",
@@ -297,17 +324,27 @@ export function playMatchAnimScript(opts: {
     }
 
     // Final commit
+    if (!alive())
+      return;
     setDisplay({
       view: nextView,
       faceDownIds: [],
       highlightIds: [],
       oppShown: nextView.opponentCount,
+      stockShown: nextView.stockCount,
       bidVisible: nextView.phase === "bidding1" || nextView.phase === "bidding2",
       heldTrick: null,
       collectTo: null,
       animBusy: false,
     });
     onBusy?.(false);
+    }
+    finally {
+      if (alive()) {
+        setDisplay(d => (d.animBusy ? { ...d, animBusy: false, view: d.view ?? nextView } : {}));
+        onBusy?.(false);
+      }
+    }
   }, "match-script");
 }
 

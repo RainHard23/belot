@@ -3,40 +3,22 @@ import { useSettingsStore } from "@/store/settingsStore";
 import { subscribeAmbient } from "@/ui/match/ambientBus";
 
 /**
- * WebAudio sound layer for table events. Deliberately not tied 1:1 to every
- * `AmbientCue` — a chime on literally every "your turn" would get grating
- * fast in a two-player card game, so only the cues below have a file.
+ * WebAudio sound layer for table events.
+ * Only deal + end-of-hand stay audible — everything else was too noisy at
+ * a two-player table.
  *
- * Downloaded CC assets (Mixkit license — free for commercial/personal use,
- * no attribution required) live in `public/sfx/<cue>.mp3`. If a fetch ever
- * fails (offline build, blocked host…) we fall back to a tiny synthesized
- * blip via `OscillatorNode` so sound never just silently breaks.
+ * Downloaded CC assets (Mixkit) live in `public/sfx/<cue>.mp3`. If a fetch
+ * fails we fall back to a tiny synthesized blip via OscillatorNode.
  */
 const SFX_FILES: Partial<Record<AmbientCue, string>> = {
   deal: "/sfx/deal.mp3",
-  bid: "/sfx/bid.mp3",
-  trump: "/sfx/trump.mp3",
-  play: "/sfx/play.mp3",
-  trick: "/sfx/trick.mp3",
   hand_end: "/sfx/hand_end.mp3",
-  declaration: "/sfx/declaration.mp3",
-  win: "/sfx/win.mp3",
-  lose: "/sfx/lose.mp3",
-  timeout: "/sfx/timeout.mp3",
 };
 
 /** Synth fallback tone (Hz) per cue, used only if the mp3 fails to load. */
 const FALLBACK_TONE: Partial<Record<AmbientCue, number>> = {
   deal: 320,
-  bid: 480,
-  trump: 620,
-  play: 440,
-  trick: 700,
   hand_end: 260,
-  declaration: 760,
-  win: 880,
-  lose: 180,
-  timeout: 220,
 };
 
 class SoundBus {

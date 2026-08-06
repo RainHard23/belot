@@ -1,8 +1,10 @@
 import type { Card, Rank, Suit } from "./types";
 
-/** Non-trump order low→high: 9, J, Q, K, 10, A */
-const NON_TRUMP_ORDER: Rank[] = ["9", "J", "Q", "K", "10", "A"];
-/** Trump order low→high: 9, 10, Q, K, A, J  — wait classic belote trump is: J, 9, A, 10, K, Q */
+/**
+ * Classic Belote sequence order (low→high): 9-10-J-Q-K-A.
+ * Contiguous runs use this — NOT trick-taking strength (where 10 beats K).
+ */
+const SEQUENCE_ORDER: Rank[] = ["9", "10", "J", "Q", "K", "A"];
 
 /** Classic belote trump strength high→low: J, 9, A, 10, K, Q */
 const TRUMP_STRENGTH: Rank[] = ["J", "9", "A", "10", "K", "Q"];
@@ -42,5 +44,5 @@ export function cardBeats(
 }
 
 export function sequenceOrder(rank: Rank): number {
-  return NON_TRUMP_ORDER.indexOf(rank);
+  return SEQUENCE_ORDER.indexOf(rank);
 }

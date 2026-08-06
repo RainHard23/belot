@@ -71,7 +71,11 @@ export class BotService {
     const { phase } = match.state;
     let result: { ok: true } | { error: string };
     if (phase === "bidding1" || phase === "bidding2") {
-      result = this.matches.doBid(matchId, botSessionId, this.chooseBid(match.state.bidding, phase));
+      result = this.matches.doBid(
+        matchId,
+        botSessionId,
+        this.chooseBid(match.state.bidding, phase, seat, match.state.firstSpeaker),
+      );
     }
     else if (phase === "playing") {
       const card = this.choosePlay(match, seat);
@@ -85,6 +89,10 @@ export class BotService {
 
     if ("error" in result) {
       console.warn("bot action failed", matchId, result.error);
+      this.timers.set(
+        matchId,
+        setTimeout(() => this.poke(matchId, server), 800),
+      );
       return;
     }
 
@@ -113,16 +121,22 @@ export class BotService {
   private chooseBid(
     bidding: { round: 1 | 2; faceUpSuit: string } | null,
     phase: "bidding1" | "bidding2",
+    seat: Seat,
+    firstSpeaker: Seat | null,
   ): BidAction {
     if (!bidding)
       return { type: "pass" };
     if (phase === "bidding1")
       return Math.random() < 0.5 ? { type: "take" } : { type: "pass" };
-    if (Math.random() < 0.45) {
-      const options = SUITS.filter(s => s !== bidding.faceUpSuit);
-      return { type: "choose", suit: options[Math.floor(Math.random() * options.length)] };
-    }
-    return { type: "pass" };
+    const options = SUITS.filter(s => s !== bidding.faceUpSuit);
+    const pick = (): BidAction => ({
+      type: "choose",
+      suit: options[Math.floor(Math.random() * options.length)]!,
+    });
+    // Dealer on round 2 must name a suit — no pass.
+    if (firstSpeaker && seat !== firstSpeaker)
+      return pick();
+    return Math.random() < 0.45 ? pick() : { type: "pass" };
   }
 
   private choosePlay(match: ReturnType<MatchService["get"]>, seat: Seat) {

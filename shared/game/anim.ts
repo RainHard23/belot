@@ -6,8 +6,20 @@ import { OTHER_SEAT } from "./types";
 /** Visual timeline events derived from MatchState transitions (per seat). */
 export type MatchAnimEvent
   = | { type: "clear_table" }
-    | { type: "deal"; cards: Card[]; kind: "initial" | "rest" }
-    | { type: "opp_deal"; from: number; to: number; kind: "initial" | "rest" }
+    | {
+      type: "deal";
+      cards: Card[];
+      kind: "initial" | "rest";
+      /** Packet index within the classic 3-3-3-3 deal (0..3), for stock ticks. */
+      packet?: number;
+    }
+    | {
+      type: "opp_deal";
+      from: number;
+      to: number;
+      kind: "initial" | "rest";
+      packet?: number;
+    }
     | { type: "face_up_show"; card: Card }
     | { type: "face_up_hide"; cardId: string; takenBy: Seat }
     | { type: "bid_ui"; phase: "bidding1" | "bidding2" }
@@ -71,17 +83,29 @@ export function deriveAnimEvents(
 
   if (isNewHand(prev, next)) {
     events.push({ type: "clear_table" });
-    events.push({
-      type: "deal",
-      cards: [...next.hands[seat]],
-      kind: "initial",
-    });
-    events.push({
-      type: "opp_deal",
-      from: 0,
-      to: next.hands[opp].length,
-      kind: "initial",
-    });
+    // Classic 3-3-3-3 from the non-dealer, then the dealer, twice.
+    const first = next.firstSpeaker;
+    const order: Seat[] = [first, OTHER_SEAT[first], first, OTHER_SEAT[first]];
+    let yourIdx = 0;
+    let oppCount = 0;
+    for (let packet = 0; packet < 4; packet++) {
+      const to = order[packet]!;
+      if (to === seat) {
+        const cards = next.hands[seat].slice(yourIdx, yourIdx + 3);
+        yourIdx += 3;
+        events.push({ type: "deal", cards, kind: "initial", packet });
+      }
+      else {
+        events.push({
+          type: "opp_deal",
+          from: oppCount,
+          to: oppCount + 3,
+          kind: "initial",
+          packet,
+        });
+        oppCount += 3;
+      }
+    }
     if (next.faceUp) {
       events.push({ type: "face_up_show", card: next.faceUp });
     }

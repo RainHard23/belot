@@ -1,5 +1,5 @@
 import type { BidAction, MatchState, Seat } from "../../../shared/game";
-import { legalMoves } from "../../../shared/game";
+import { legalMoves, SUITS } from "../../../shared/game";
 
 /**
  * Pure decision of what happens when a human's turn clock expires. Kept
@@ -18,9 +18,17 @@ export function decideTimeout(
   rng: () => number = Math.random,
 ): TimeoutDecision {
   if (state.phase === "bidding1" || state.phase === "bidding2") {
-    // Passing is always legal in both bidding rounds (see shared/game/bidding.ts
-    // — `applyBidFixed` never rejects `{ type: "pass" }`), so a flat auto-pass
-    // is safe regardless of round.
+    // Round 2 + dealer: pass is illegal — pick a random legal suit instead.
+    if (
+      state.phase === "bidding2"
+      && state.firstSpeaker
+      && seat !== state.firstSpeaker
+      && state.bidding
+    ) {
+      const options = SUITS.filter(s => s !== state.bidding!.faceUpSuit);
+      const suit = options[Math.floor(rng() * options.length)]!;
+      return { kind: "bid", action: { type: "choose", suit } };
+    }
     return { kind: "bid", action: { type: "pass" } };
   }
   if (state.phase === "playing") {

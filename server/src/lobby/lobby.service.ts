@@ -29,6 +29,8 @@ export interface LobbyTable {
   status: "open" | "waiting" | "live";
   /** SessionIds that have paid buy-in for this table seating. */
   paidSessions: Set<string>;
+  /** Stable refund tokens per paid seating attempt (sessionId → token). */
+  paidTokens: Map<string, string>;
 }
 
 const TABLE_NAMES = [
@@ -60,6 +62,7 @@ export class LobbyService {
         matchId: null,
         status: "open",
         paidSessions: new Set(),
+        paidTokens: new Map(),
       });
     }
   }
@@ -122,7 +125,7 @@ export class LobbyService {
       if (other.id === tableId)
         continue;
       if (other.seats.some(s => s?.sessionId === sessionId))
-        this.leave(other.id, sessionId);
+        return { error: "already_seated" };
     }
 
     if (table.matchId && !table.seats.some(s => s?.sessionId === sessionId)) {
@@ -149,16 +152,122 @@ export class LobbyService {
     return { table, seatIndex: free, newlySeated: true };
   }
 
-  markPaid(tableId: string, sessionId: string) {
-    this.tables.get(tableId)?.paidSessions.add(sessionId);
+  /**
+   * Stable token for one seating / buy-in attempt. Reused for debit + sit-fail
+   * refund idempotency so double-click cannot charge twice.
+   */
+  ensureBuyInToken(tableId: string, sessionId: string): string | null {
+    const table = this.tables.get(tableId);
+    if (!table)
+      return null;
+    const existing = table.paidTokens.get(sessionId);
+    if (existing)
+      return existing;
+    const token = randomUUID();
+    table.paidTokens.set(sessionId, token);
+    return token;
+  }
+
+  /** Mark buy-in complete. Pass `token` when re-arming after a failed refund. */
+  markPaid(tableId: string, sessionId: string, token?: string) {
+    const table = this.tables.get(tableId);
+    if (!table)
+      return;
+    table.paidSessions.add(sessionId);
+    if (token)
+      table.paidTokens.set(sessionId, token);
+    else if (!table.paidTokens.has(sessionId))
+      table.paidTokens.set(sessionId, randomUUID());
   }
 
   clearPaid(tableId: string, sessionId: string) {
-    this.tables.get(tableId)?.paidSessions.delete(sessionId);
+    const table = this.tables.get(tableId);
+    if (!table)
+      return;
+    table.paidSessions.delete(sessionId);
+    table.paidTokens.delete(sessionId);
+  }
+
+  /** After pot settle / forfeit — stop leave-refund from double-paying. */
+  clearAllPaid(tableId: string) {
+    const table = this.tables.get(tableId);
+    if (!table)
+      return;
+    table.paidSessions.clear();
+    table.paidTokens.clear();
   }
 
   wasPaid(tableId: string, sessionId: string) {
     return this.tables.get(tableId)?.paidSessions.has(sessionId) ?? false;
+  }
+
+  /**
+   * Synchronously claim a paid seat for refund (prevents concurrent double credit).
+   * Returns the seating token for a stable idempotency key, or null.
+   */
+  claimPaidForRefund(tableId: string, sessionId: string): string | null {
+    const table = this.tables.get(tableId);
+    if (!table || !table.paidSessions.has(sessionId))
+      return null;
+    const token = table.paidTokens.get(sessionId) ?? randomUUID();
+    table.paidSessions.delete(sessionId);
+    table.paidTokens.delete(sessionId);
+    return token;
+  }
+
+  /** Free every seat after a match ends so winners aren't stuck seated. */
+  releaseTable(tableId: string) {
+    const table = this.tables.get(tableId);
+    if (!table)
+      return;
+    table.seats = [null, null];
+    table.matchId = null;
+    table.status = "open";
+    table.paidSessions.clear();
+    table.paidTokens.clear();
+  }
+
+  /**
+   * Recreate a table with a known id after server restart so live match
+   * snapshots can reattach seats (default lobby tables use random UUIDs).
+   */
+  ensureRestoredTable(opts: {
+    id: string;
+    name?: string;
+    buyIn: number;
+    target: number;
+    seats: (LobbySeat | null)[];
+    matchId: string;
+    paidSessionIds?: string[];
+  }): LobbyTable {
+    const existing = this.tables.get(opts.id);
+    if (existing) {
+      existing.seats = opts.seats;
+      existing.matchId = opts.matchId;
+      existing.buyIn = opts.buyIn;
+      existing.target = opts.target;
+      existing.paidSessions = new Set(opts.paidSessionIds ?? []);
+      existing.paidTokens = new Map(
+        (opts.paidSessionIds ?? []).map(id => [id, randomUUID()] as const),
+      );
+      existing.status = "live";
+      return existing;
+    }
+    const table: LobbyTable = {
+      id: opts.id,
+      name: opts.name ?? "Восстановленный стол",
+      buyIn: opts.buyIn,
+      target: opts.target,
+      seats: opts.seats,
+      matchId: opts.matchId,
+      status: "live",
+      paidSessions: new Set(opts.paidSessionIds ?? []),
+      paidTokens: new Map(
+        (opts.paidSessionIds ?? []).map(id => [id, randomUUID()] as const),
+      ),
+    };
+    this.tables.set(opts.id, table);
+    return table;
   }
 
   sitBot(tableId: string, name = "Бот"): { table: LobbyTable; seatIndex: number } | { error: string } {
@@ -187,11 +296,12 @@ export class LobbyService {
     table.seats = table.seats.map(s =>
       s?.sessionId === sessionId ? null : s,
     ) as (LobbySeat | null)[];
-    table.paidSessions.delete(sessionId);
+    // Paid flags are claimed before wallet refund — don't wipe unpaid claims here.
     if (table.seats.every(s => s === null)) {
       table.matchId = null;
       table.status = "open";
-      table.paidSessions.clear();
+      if (table.paidSessions.size === 0)
+        table.paidTokens.clear();
     }
   }
 

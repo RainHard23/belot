@@ -1,10 +1,11 @@
 import type { Suit } from "@shared/game";
 import type { RoomQuality, RoomStyle, TableThemeId } from "@/store/settingsStore";
 import { legalMoves, SUITS } from "@shared/game";
-import { HelpCircle, Menu, Settings, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, HelpCircle, Menu, Settings, Volume2, VolumeX, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
+import { useLobbyStore } from "@/store/lobbyStore";
 import { useMatchStore } from "@/store/matchStore";
 import { useResolvedRoomQuality, useSettingsStore } from "@/store/settingsStore";
 import { attachSoundBus } from "@/ui/audio/soundBus";
@@ -15,11 +16,9 @@ import { ActionButton, IconButton } from "./controls/ActionButton";
 import { Panel } from "./controls/Panel";
 import { Pill } from "./controls/Pill";
 import { Popover } from "./controls/Popover";
+import { DeckStack } from "./DeckStack";
 import { EmotePanel } from "./EmotePanel";
 import { HandEndPanel } from "./HandEndPanel";
-import { HandLogPanel } from "./HandLogPanel";
-import { HintsPanel } from "./HintsPanel";
-import { KittyStack } from "./KittyStack";
 import { PlayingCard } from "./PlayingCard";
 import { LegacyBackdrop } from "./room/LegacyBackdrop";
 import { RoomStage } from "./room/RoomStage";
@@ -27,8 +26,10 @@ import { SceneBackdrop } from "./room/SceneBackdrop";
 import { ScorePanel } from "./ScorePanel";
 import { SeatPod } from "./SeatPod";
 import { gridTemplateRows, useStageRows } from "./stageLayout";
+import { getDeckAnchor, getOtboyAnchor, offsetFromAnchor } from "./tableAnchors";
 import { TableSurface } from "./TableSurface";
 import { TrickPile } from "./TrickPile";
+import { TrumpBadge } from "./TrumpBadge";
 
 const TABLE_THEMES = [
   { id: "neon", label: "Неон", swatch: "linear-gradient(135deg,#16244f,#3b6bff)" },
@@ -42,7 +43,7 @@ const SCENE_THEMES = [
   { id: "tavern", label: "Таверна", swatch: "linear-gradient(135deg,#6b3d28,#d4b896)" },
 ] as const;
 
-type ThemeSwatch = { id: string; label: string; swatch: string };
+interface ThemeSwatch { id: string; label: string; swatch: string }
 
 const HAND_SIZE_MAP = { sm: "md", md: "lg", lg: "xl" } as const;
 
@@ -117,7 +118,7 @@ function MatchRoom({
 }: {
   theme: TableThemeId;
   roomStyle: RoomStyle;
-  roomQuality: RoomQuality;
+  roomQuality: Exclude<RoomQuality, "auto">;
 }) {
   return (
     <div
@@ -139,7 +140,7 @@ export function MatchScreen({
   onLeave,
 }: {
   matchId: string;
-  onLeave: () => void;
+  onLeave: (opts?: { soft?: boolean }) => void;
 }) {
   const {
     join,
@@ -163,10 +164,10 @@ export function MatchScreen({
   const setSoundOn = useSettingsStore(s => s.setSoundOn);
   const soundVolume = useSettingsStore(s => s.soundVolume);
   const setSoundVolume = useSettingsStore(s => s.setSoundVolume);
-  const hintsOn = useSettingsStore(s => s.hintsOn);
-  const setHintsOn = useSettingsStore(s => s.setHintsOn);
   const leftHanded = useSettingsStore(s => s.leftHanded);
   const cardSize = useSettingsStore(s => s.cardSize);
+  const hintsOn = useSettingsStore(s => s.hintsOn);
+  const setHintsOn = useSettingsStore(s => s.setHintsOn);
   const roomQualitySetting = useSettingsStore(s => s.roomQuality);
   const setRoomQuality = useSettingsStore(s => s.setRoomQuality);
   const roomStyle = useSettingsStore(s => s.roomStyle);
@@ -181,6 +182,14 @@ export function MatchScreen({
   const [showMobilePanels, setShowMobilePanels] = useState(false);
   const [selectedCardIdx, setSelectedCardIdx] = useState<number | null>(null);
   const matchOverAnnouncedRef = useRef(false);
+  const handDockRef = useRef<HTMLDivElement>(null);
+  const oppRowRef = useRef<HTMLDivElement>(null);
+  const trickCenterRef = useRef<HTMLDivElement>(null);
+  /** Fly-from-deck offsets measured against live #table-deck-anchor. */
+  const [deckToHand, setDeckToHand] = useState({ x: -280, y: -140 });
+  const [deckToOpp, setDeckToOpp] = useState({ x: -280, y: 160 });
+  const [otboyTop, setOtboyTop] = useState({ x: -280, y: -160 });
+  const [otboyBottom, setOtboyBottom] = useState({ x: 280, y: 140 });
 
   // Lock document scroll for the whole match — log/panel scrolls must not
   // drag the stage (scrollIntoView / overscroll chaining).
@@ -194,6 +203,33 @@ export function MatchScreen({
       document.body.style.overflow = prevBody;
     };
   }, []);
+
+  // Deal / collect flights use real deck & otboy geometry.
+  useEffect(() => {
+    function measure() {
+      const deck = getDeckAnchor();
+      const toHand = offsetFromAnchor(handDockRef.current, deck);
+      if (toHand)
+        setDeckToHand(toHand);
+      const toOpp = offsetFromAnchor(oppRowRef.current, deck);
+      if (toOpp)
+        setDeckToOpp(toOpp);
+      const toTop = offsetFromAnchor(trickCenterRef.current, getOtboyAnchor("top"));
+      if (toTop)
+        setOtboyTop(toTop);
+      const toBottom = offsetFromAnchor(trickCenterRef.current, getOtboyAnchor("bottom"));
+      if (toBottom)
+        setOtboyBottom(toBottom);
+    }
+    measure();
+    // Remeasure after layout settles (deck/otboy mount mid-hand).
+    const t = window.setTimeout(measure, 50);
+    window.addEventListener("resize", measure);
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener("resize", measure);
+    };
+  }, [display.dealEpoch, display.oppShown, view?.phase, view?.stockCount, view?.kittyCount, view?.faceUp, view?.tricksTaken]);
   // Touch/coarse pointers (phones, tablets) get two-tap-to-play below instead
   // of the desktop single-click — `whileHover` lift means nothing without a
   // mouse, so a direct tap would otherwise play a card the instant it's
@@ -207,10 +243,20 @@ export function MatchScreen({
     return () => clear();
   }, [join, matchId, clear]);
 
+  // Stale match id (server gone / not seated) — leave lobby seat if any.
+  // Keep the match-over panel if we already have a result (peer left after win).
+  useEffect(() => {
+    if (endedReason !== "ended")
+      return;
+    if (view?.matchOver)
+      return;
+    onLeave({ soft: !useLobbyStore.getState().seatedTableId });
+  }, [endedReason, onLeave, view?.matchOver]);
+
   useEffect(() => {
     if (endedReason === "opponent_left")
-      onLeave();
-  }, [endedReason, onLeave]);
+      window.dispatchEvent(new Event("belote:balance"));
+  }, [endedReason]);
 
   // Mount the WebAudio layer once; it self-subscribes to ambientBus and
   // unlocks on first user gesture (autoplay policy).
@@ -275,7 +321,8 @@ export function MatchScreen({
         }
         if (e.key === "Escape") {
           e.preventDefault();
-          bid({ type: "pass" });
+          if (!(view.phase === "bidding2" && view.you === view.dealer))
+            bid({ type: "pass" });
           return;
         }
         if (view.phase === "bidding2" && /^[1-4]$/.test(e.key)) {
@@ -325,11 +372,29 @@ export function MatchScreen({
         <div className="pointer-events-none absolute inset-0 z-[1]">
           <AmbientOverlay />
         </div>
-        <div className="relative z-10 text-lg font-semibold">{ru.loadingTable}</div>
-        {error && <div className="relative z-10 text-sm text-rose-300">{error}</div>}
-        <button type="button" className="relative z-10 text-sm text-[var(--accent)]" onClick={onLeave}>
-          {ru.backLobby}
-        </button>
+        {endedReason === "opponent_left"
+          ? (
+              <div className="relative z-10 flex max-w-sm flex-col items-center gap-3 rounded-[18px] border border-white/10 bg-black/70 px-6 py-5 text-center backdrop-blur">
+                <div className="text-lg font-bold text-white">{ru.opponentLeft}</div>
+                <p className="text-sm text-white/65">{ru.opponentLeftWin}</p>
+                <button
+                  type="button"
+                  className="text-sm font-semibold text-[var(--accent)]"
+                  onClick={() => onLeave({ soft: true })}
+                >
+                  {ru.backLobby}
+                </button>
+              </div>
+            )
+          : (
+              <>
+                <div className="relative z-10 text-lg font-semibold">{ru.loadingTable}</div>
+                {error && <div className="relative z-10 text-sm text-rose-300">{error}</div>}
+                <button type="button" className="relative z-10 text-sm text-[var(--accent)]" onClick={() => onLeave()}>
+                  {ru.backLobby}
+                </button>
+              </>
+            )}
       </div>
     );
   }
@@ -352,14 +417,13 @@ export function MatchScreen({
 
   const sidePanels = (
     <>
-      <HandLogPanel players={players} you={view.you} />
       <ScorePanel view={view} players={players} />
-      {hintsOn && <HintsPanel view={view} />}
       <EmotePanel onSend={sendEmote} />
     </>
   );
 
   /** Overlaid just above the hand fan during bidding. */
+  const mustChoose = view.phase === "bidding2" && myTurn && view.you === view.dealer;
   const bidBar = bidding && myTurn && (
     <motion.div
       initial={{ opacity: 0 }}
@@ -388,9 +452,14 @@ export function MatchScreen({
             {ru.suits[suit]}
           </ActionButton>
         ))}
-      <ActionButton variant="pass" size="md" onClick={() => bid({ type: "pass" })}>
-        {ru.pass}
-      </ActionButton>
+      {!mustChoose && (
+        <ActionButton variant="pass" size="md" onClick={() => bid({ type: "pass" })}>
+          {ru.pass}
+        </ActionButton>
+      )}
+      {mustChoose && (
+        <span className="px-2 text-[12px] font-semibold text-[var(--accent)]">{ru.mustChoose}</span>
+      )}
     </motion.div>
   );
 
@@ -414,9 +483,14 @@ export function MatchScreen({
       {/* Row 1: HUD */}
       <header className="relative z-40 flex shrink-0 items-center justify-between gap-3 px-4 md:px-6">
         <div className="flex items-center gap-2">
-          <ActionButton variant="ghost" size="sm" onClick={onLeave}>
-            ←
-            {" "}
+          <ActionButton
+            variant="ghost"
+            size="md"
+            onClick={() => onLeave()}
+            aria-label={ru.backLobby}
+            className="gap-2 border-white/20 bg-black/65 px-4 text-white shadow-[0_8px_24px_rgba(0,0,0,0.45)] hover:border-[var(--accent)]/55 hover:bg-black/80 hover:text-[var(--accent)]"
+          >
+            <ArrowLeft size={16} strokeWidth={2.4} />
             {ru.backLobby}
           </ActionButton>
           <IconButton
@@ -429,12 +503,9 @@ export function MatchScreen({
           </IconButton>
         </div>
 
-        {/* Never wraps: a second row here would spill out of the fixed-height
-          * HUD row and land on top of the opponent's seat pod (visible at
-          * 390px). Bolts drop out instead — they're in the score panel too. */}
+        {/* Compact score only — trump lives on the table, bolts in the side panel. */}
         <div className="flex min-w-0 flex-nowrap items-center justify-center gap-1.5 overflow-hidden">
           <Pill>
-            <span className="text-[var(--muted)]">{ru.score}</span>
             <span className="font-bold tabular-nums text-[var(--accent)]">
               {view.matchScore.p0}
               {" "}
@@ -447,34 +518,31 @@ export function MatchScreen({
               {view.target}
             </span>
           </Pill>
-          <Pill className="hidden sm:flex">
-            <span className="text-[var(--muted)]">{ru.bolts}</span>
-            <span className="font-semibold tabular-nums">
-              {view.matchScore.bolts.p0}
-              /
-              {view.matchScore.bolts.p1}
-            </span>
-          </Pill>
-          <Pill>
-            {view.trump
-              ? (
-                  <>
-                    <span className="text-[var(--muted)]">{ru.trump}</span>
-                    <span className="font-bold text-[var(--accent)]">
-                      {ru.suitSym[view.trump]}
-                      {" "}
-                      {ru.suits[view.trump]}
-                    </span>
-                  </>
-                )
-              : <span className="font-semibold text-[var(--accent)]">{ru.bidding}</span>}
-          </Pill>
+          {(view.phase === "bidding1" || view.phase === "bidding2") && (
+            <Pill>
+              <span className="font-semibold text-[var(--accent)]">{ru.bidding}</span>
+            </Pill>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5">
           <IconButton label="Горячие клавиши (?)" active={showHotkeys} onClick={() => setShowHotkeys(v => !v)}>
             <HelpCircle size={16} />
           </IconButton>
+          <SettingsPopover
+            theme={theme}
+            onTheme={setTheme}
+            soundOn={soundOn}
+            onSoundOn={setSoundOn}
+            soundVolume={soundVolume}
+            onSoundVolume={setSoundVolume}
+            hintsOn={hintsOn}
+            onHintsOn={setHintsOn}
+            roomQuality={roomQualitySetting}
+            onRoomQuality={setRoomQuality}
+            roomStyle={roomStyle}
+            onRoomStyle={setRoomStyle}
+          />
         </div>
       </header>
 
@@ -505,12 +573,11 @@ export function MatchScreen({
         </div>
       )}
 
-      {/* Felt — seats for opponent only; your seat sits under the hand. */}
+        {/* Felt — seats for opponent only; your seat sits under the hand. */}
       <div className="relative z-10 min-h-0 overflow-hidden">
         <div className="pointer-events-none absolute inset-x-0 top-1 z-30 flex justify-center">
           <div className="pointer-events-auto">
             <SeatPod
-              compact
               key={`opp-${opp?.name ?? "opp"}`}
               name={opp?.name ?? "Соперник"}
               active={view.turn === oppSeat}
@@ -525,21 +592,6 @@ export function MatchScreen({
           </div>
         </div>
 
-        {/* `inset-y-2` rather than `top-2` on purpose: with an auto height the
-          * panels' `max-h` percentage had nothing to resolve against, so the
-          * stack overflowed the felt row, made it scrollable despite
-          * `overflow-hidden`, and a single focus-driven scroll then dragged
-          * the whole table up out of view (only visible under ~780px tall). */}
-        <aside
-          className={cn(
-            "pointer-events-none absolute inset-y-2 z-30 hidden w-[220px] min-[1100px]:block",
-            leftHanded ? "right-3" : "left-3",
-          )}
-        >
-          <div className="pointer-events-auto h-full min-h-0 overflow-y-auto overscroll-contain">
-            <HandLogPanel players={players} you={view.you} />
-          </div>
-        </aside>
         <aside
           className={cn(
             "pointer-events-none absolute inset-y-2 z-30 hidden w-[220px] min-[1100px]:block",
@@ -548,7 +600,6 @@ export function MatchScreen({
         >
           <div className="pointer-events-auto flex h-full min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain">
             <ScorePanel view={view} players={players} />
-            {hintsOn && <HintsPanel view={view} />}
             <EmotePanel onSend={sendEmote} />
           </div>
         </aside>
@@ -563,7 +614,25 @@ export function MatchScreen({
             />
           )}
 
-          {view.phase === "playing" && (
+          {/* Stock / kitty + face-up trump on the deck during deal/bidding. */}
+          <DeckStack
+            count={
+              view.phase === "playing" || view.phase === "handEnd"
+                ? view.kittyCount
+                : (display.stockShown || view.stockCount)
+            }
+            label={
+              view.phase === "playing" || view.phase === "handEnd"
+                ? ru.kitty
+                : ru.deck
+            }
+            faceUp={view.faceUp}
+          />
+
+          {view.trump && <TrumpBadge suit={view.trump} />}
+
+          {/* Two otboy piles — one per player, as in real Belote. */}
+          {(view.phase === "playing" || view.phase === "handEnd") && (
             <>
               <TrickPile
                 count={view.tricksTaken[oppSeat]}
@@ -575,18 +644,26 @@ export function MatchScreen({
                 side="right"
                 pulse={display.collectTo === "bottom"}
               />
-              <KittyStack count={view.kittyCount} />
             </>
           )}
 
-          {/* Opponent backs — near top felt */}
-          <div className="absolute left-1/2 top-[10%] z-20 flex -translate-x-1/2">
+          {/* Opponent backs — below seat pod so “Бот” never covers them. */}
+          <div
+            ref={oppRowRef}
+            className="absolute left-1/2 top-[22%] z-20 flex -translate-x-1/2"
+          >
             {Array.from({ length: display.oppShown }).map((_, i) => (
               <motion.div
                 key={`opp-${display.dealEpoch}-${i}`}
-                initial={{ y: -12, opacity: 0, scale: 0.92 }}
+                initial={{
+                  y: deckToOpp.y,
+                  x: deckToOpp.x,
+                  opacity: 0,
+                  scale: 0.65,
+                  rotate: -18,
+                }}
                 animate={{ y: 0, x: 0, opacity: 1, scale: 1, rotate: 0 }}
-                transition={{ type: "spring", stiffness: 320, damping: 22 }}
+                transition={{ type: "spring", stiffness: 280, damping: 20 }}
                 style={{ marginLeft: i === 0 ? 0 : -42, zIndex: i }}
               >
                 <PlayingCard faceDown size="sm" />
@@ -594,64 +671,53 @@ export function MatchScreen({
             ))}
           </div>
 
-          {/* Center play / face-up */}
+          {/* Center: live trick only (face-up lives on the deck). */}
           <div
-            className={cn(
-              "absolute left-1/2 top-[48%] z-20 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-6 transition-all duration-500 ease-out",
-              display.collectTo === "top" && "-translate-x-[46%] -translate-y-[130%] rotate-[-14deg] scale-50 opacity-0",
-              display.collectTo === "bottom" && "translate-x-[46%] translate-y-[90%] rotate-[14deg] scale-50 opacity-0",
-            )}
+            ref={trickCenterRef}
+            className="absolute left-1/2 top-[48%] z-20 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-6"
           >
-            {view.faceUp && (
-              <motion.div
-                className="flex flex-col items-center gap-2"
-                initial={{ scale: 0.55, opacity: 0, rotateY: 90 }}
-                animate={{ scale: 1, opacity: 1, rotateY: 0 }}
-                transition={{ type: "spring", stiffness: 260, damping: 16 }}
-              >
-                <span className="rounded-full border border-[var(--accent)]/40 bg-black/55 px-3 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent)] backdrop-blur">
-                  {ru.faceUp}
-                </span>
-                <PlayingCard
-                  card={view.faceUp}
-                  size="lg"
-                  layoutId={`card-${view.faceUp.id}`}
-                  glow="gold"
-                />
-              </motion.div>
-            )}
-
             <AnimatePresence mode="popLayout">
-              {tableTrick.map((p, idx) => (
-                <motion.div
-                  key={p.card.id}
-                  layoutId={`trick-${p.card.id}`}
-                  initial={{
-                    scale: 0.65,
-                    opacity: 0,
-                    y: p.seat === view.you ? 70 : -70,
-                    rotate: p.seat === view.you ? 6 : -6,
-                  }}
-                  animate={{
-                    scale: 1,
-                    opacity: 1,
-                    y: 0,
-                    rotate: idx === 0 ? -8 : 8,
-                    x: idx === 0 ? -8 : 8,
-                  }}
-                  exit={{ opacity: 0, scale: 0.45 }}
-                  transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                >
-                  <PlayingCard
-                    card={p.card}
-                    size="lg"
-                    layoutId={`card-${p.card.id}`}
-                  />
-                </motion.div>
-              ))}
+              {tableTrick.map((p, idx) => {
+                const collecting = display.collectTo != null;
+                const collectTarget = display.collectTo === "top"
+                  ? otboyTop
+                  : display.collectTo === "bottom"
+                    ? otboyBottom
+                    : { x: 0, y: 0 };
+                return (
+                  <motion.div
+                    key={p.card.id}
+                    initial={{
+                      scale: 0.65,
+                      opacity: 0,
+                      y: p.seat === view.you ? 70 : -70,
+                      rotate: p.seat === view.you ? 6 : -6,
+                    }}
+                    animate={{
+                      scale: collecting ? 0.4 : 1,
+                      opacity: collecting ? 0 : 1,
+                      y: collecting ? collectTarget.y : 0,
+                      x: collecting
+                        ? collectTarget.x
+                        : (idx === 0 ? -8 : 8),
+                      rotate: collecting
+                        ? (display.collectTo === "top" ? -18 : 14)
+                        : (idx === 0 ? -8 : 8),
+                    }}
+                    exit={{ opacity: 0, scale: 0.4 }}
+                    transition={{ type: "spring", stiffness: 280, damping: 22 }}
+                  >
+                    <PlayingCard
+                      card={p.card}
+                      size="lg"
+                      layoutId={`trick-${p.card.id}`}
+                    />
+                  </motion.div>
+                );
+              })}
             </AnimatePresence>
 
-            {!view.faceUp && tableTrick.length === 0 && !display.collectTo && view.phase === "playing" && (
+            {tableTrick.length === 0 && !display.collectTo && view.phase === "playing" && (
               <motion.div
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
@@ -668,26 +734,6 @@ export function MatchScreen({
         </div>
       </div>
 
-      {/* Settings — bottom-right, panel opens upward */}
-      <div className="pointer-events-none absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-3 z-40 min-[1100px]:right-[240px]">
-        <div className="pointer-events-auto">
-          <SettingsPopover
-            theme={theme}
-            onTheme={setTheme}
-            soundOn={soundOn}
-            onSoundOn={setSoundOn}
-            soundVolume={soundVolume}
-            onSoundVolume={setSoundVolume}
-            hintsOn={hintsOn}
-            onHintsOn={setHintsOn}
-            roomQuality={roomQualitySetting}
-            onRoomQuality={setRoomQuality}
-            roomStyle={roomStyle}
-            onRoomStyle={setRoomStyle}
-          />
-        </div>
-      </div>
-
       {/* Hand dock — cards overlap the table rail; avatar under cards. */}
       <div className="relative z-50 flex w-full flex-col items-center justify-end overflow-visible px-3 pb-[max(0.25rem,env(safe-area-inset-bottom))]">
         {bidBar && (
@@ -695,7 +741,7 @@ export function MatchScreen({
             <div className="pointer-events-auto">{bidBar}</div>
           </div>
         )}
-        <div className="relative z-50 -mt-8 flex w-full items-end justify-center">
+        <div ref={handDockRef} className="relative z-50 -mt-8 flex w-full items-end justify-center">
           {view.hand.map((card, i) => {
             const n = view.hand.length;
             const mid = (n - 1) / 2;
@@ -717,12 +763,14 @@ export function MatchScreen({
               <motion.div
                 key={`${display.dealEpoch}-${card.id}`}
                 initial={{
-                  y: 28,
+                  y: deckToHand.y,
+                  x: deckToHand.x,
                   opacity: 0,
-                  rotate: rot * 0.4,
-                  scale: 0.92,
+                  rotate: rot * 0.4 - 14,
+                  scale: 0.55,
                 }}
                 animate={{
+                  x: 0,
                   y: (canPlay ? -10 : 0) + lift + (selected ? -16 : 0),
                   opacity: dimIllegal ? 0.32 : 1,
                   rotate: rot,
@@ -759,7 +807,7 @@ export function MatchScreen({
                         setSelectedCardIdx(null);
                       }
                     : undefined}
-                  glow={canPlay ? "legal" : highlight ? "gold" : selected ? "gold" : false}
+                  glow={canPlay && hintsOn ? "legal" : highlight ? "gold" : selected ? "gold" : false}
                 />
               </motion.div>
             );
@@ -771,13 +819,12 @@ export function MatchScreen({
             key={`you-${you?.name ?? "you"}`}
             name={you?.name ?? "Вы"}
             you
-            active={myTurn}
+            active={view.turn === view.you && !view.matchOver}
             tricks={view.tricksTaken[view.you]}
             isDealer={view.dealer === view.you}
             isTaker={view.taker === view.you}
             declarations={yourDecls}
             position="bottom"
-            compact
             reaction={reactions[view.you] ?? null}
             turnDeadlineAt={view.turnDeadlineAt}
           />
@@ -794,7 +841,26 @@ export function MatchScreen({
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
           >
-            <HandEndPanel view={view} players={players} onNext={nextHand} onLeave={onLeave} />
+            <HandEndPanel view={view} players={players} onNext={nextHand} onLeave={() => onLeave()} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {endedReason === "opponent_left" && !view.matchOver && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          >
+            <div className="flex max-w-sm flex-col items-center gap-3 rounded-[18px] border border-white/10 bg-[#12131a] px-6 py-5 text-center shadow-2xl">
+              <div className="text-lg font-bold text-white">{ru.opponentLeft}</div>
+              <p className="text-sm text-white/65">{ru.opponentLeftWin}</p>
+              <ActionButton variant="primary" size="lg" onClick={() => onLeave({ soft: true })}>
+                {ru.backLobby}
+              </ActionButton>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -818,7 +884,7 @@ export function MatchScreen({
               className="fixed inset-x-0 bottom-0 z-40 max-h-[75vh] overflow-y-auto rounded-t-[20px] border-t border-white/10 bg-[#0a0b0e] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] min-[1100px]:hidden"
             >
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-sm font-bold text-white">{ru.logTitle}</span>
+                <span className="text-sm font-bold text-white">{ru.scoreTitle}</span>
                 <IconButton label="Закрыть" onClick={() => setShowMobilePanels(false)}>
                   <X size={16} />
                 </IconButton>
@@ -873,7 +939,7 @@ function SettingsPopover({
 }) {
   return (
     <Popover
-      side="top"
+      side="bottom"
       align="end"
       trigger={({ open, toggle }) => (
         <IconButton label="Настройки" active={open} onClick={toggle}>
@@ -941,7 +1007,7 @@ function SettingsPopover({
         )}
 
         <label className="flex items-center justify-between text-[12px] text-white/80">
-          <span>Подсказки</span>
+          <span>Подсветка ходов</span>
           <input
             type="checkbox"
             checked={hintsOn}

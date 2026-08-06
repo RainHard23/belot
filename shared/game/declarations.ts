@@ -36,26 +36,27 @@ function findSequences(
           r => hand.find(c => c.suit === suit && c.rank === r)!,
         );
         let kind: DeclarationKind;
+        // rawPoints = ochki (added before toPoints); gameBonus = пункты for UI.
         let rawPoints: number;
         let gameBonus: number;
         if (run.length >= 6) {
           kind = "six_plain";
-          rawPoints = 15;
+          rawPoints = 150;
           gameBonus = 15;
         }
         else if (run.length >= 5) {
           kind = "hundred_seq";
-          rawPoints = 10;
+          rawPoints = 100;
           gameBonus = 10;
         }
         else if (run.length >= 4) {
           kind = "fifty";
-          rawPoints = 5;
+          rawPoints = 50;
           gameBonus = 5;
         }
         else {
           kind = "tierce";
-          rawPoints = 2;
+          rawPoints = 20;
           gameBonus = 2;
         }
         out.push({
@@ -87,12 +88,12 @@ function findSequences(
 function findFourOfKind(hand: Card[], seat: Seat): Declaration[] {
   const out: Declaration[] = [];
   const configs: { rank: Rank; kind: DeclarationKind; raw: number; bonus: number }[] = [
-    { rank: "J", kind: "four_jacks", raw: 20, bonus: 20 },
-    { rank: "9", kind: "four_nines", raw: 14, bonus: 14 },
-    { rank: "A", kind: "four_aces", raw: 11, bonus: 11 },
-    { rank: "10", kind: "hundred_four", raw: 10, bonus: 10 },
-    { rank: "K", kind: "hundred_four", raw: 10, bonus: 10 },
-    { rank: "Q", kind: "hundred_four", raw: 10, bonus: 10 },
+    { rank: "J", kind: "four_jacks", raw: 200, bonus: 20 },
+    { rank: "9", kind: "four_nines", raw: 140, bonus: 14 },
+    { rank: "A", kind: "four_aces", raw: 110, bonus: 11 },
+    { rank: "10", kind: "hundred_four", raw: 100, bonus: 10 },
+    { rank: "K", kind: "hundred_four", raw: 100, bonus: 10 },
+    { rank: "Q", kind: "hundred_four", raw: 100, bonus: 10 },
   ];
   for (const cfg of configs) {
     const cards = hand.filter(c => c.rank === cfg.rank);
@@ -151,10 +152,12 @@ export function resolveDeclarations(
   const bellas: Declaration[] = [];
 
   for (const seat of ["p0", "p1"] as Seat[]) {
+    const seqs = findSequences(hands[seat], seat);
+    let belnyId: string | null = null;
+
     const bellaCards = hasBella(hands[seat], trump);
     if (bellaCards) {
-      // Check belny tierce J-K or Q-A trump
-      const seqs = findSequences(hands[seat], seat);
+      // Belny: trump tierce J-Q-K or Q-K-A counts as bella+4, not also as tierce.
       const belny = seqs.find(
         s =>
           s.suit === trump
@@ -163,10 +166,11 @@ export function resolveDeclarations(
             || (s.ranks?.includes("Q") && s.ranks?.includes("K") && s.ranks?.includes("A"))),
       );
       if (belny) {
+        belnyId = belny.id;
         bellas.push({
           ...belny,
           kind: "bella",
-          rawPoints: 4,
+          rawPoints: 40,
           gameBonus: 4,
           id: `${seat}_belny`,
         });
@@ -178,7 +182,7 @@ export function resolveDeclarations(
           kind: "bella",
           suit: trump,
           ranks: ["Q", "K"],
-          rawPoints: 2,
+          rawPoints: 20,
           gameBonus: 2,
           cards: bellaCards,
         });
@@ -197,18 +201,15 @@ export function resolveDeclarations(
         kind: "bilot",
         suit: trump,
         ranks: [...RANKS],
-        rawPoints: 15,
+        rawPoints: 150,
         gameBonus: 15,
         cards: hands[seat].filter(c => c.suit === trump),
       });
     }
     else {
-      candidates.push(...findSequences(hands[seat], seat).filter(s => s.suit !== trump || s.kind !== "tierce" || !bellas.some(b => b.seat === seat && b.kind === "bella" && b.rawPoints === 4)));
-      // also non-trump / other sequences
+      // One pass only — exclude the sequence promoted to belny (no double-count).
       candidates.push(
-        ...findSequences(hands[seat], seat).filter(
-          s => !(s.suit === trump && s.kind === "six_plain"),
-        ),
+        ...seqs.filter(s => s.id !== belnyId),
       );
     }
     candidates.push(...findFourOfKind(hands[seat], seat));

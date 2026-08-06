@@ -48,26 +48,40 @@ export class WalletService {
     if (!Number.isInteger(input.amount) || input.amount === 0)
       throw new BadRequestException("Некорректная сумма");
 
-    const existing = await prisma.ledgerEntry.findUnique({
-      where: { idempotencyKey: input.idempotencyKey },
-    });
-    if (existing) {
-      const balance = await this.getBalance(input.userId);
-      return { balance, created: false };
-    }
-
     return prisma.$transaction(async (tx) => {
-      await this.ensureWalletTx(tx, input.userId);
-      const wallet = await tx.wallet.findUniqueOrThrow({
-        where: { userId: input.userId },
+      const existing = await tx.ledgerEntry.findUnique({
+        where: { idempotencyKey: input.idempotencyKey },
       });
+      if (existing) {
+        const wallet = await tx.wallet.findUniqueOrThrow({
+          where: { userId: input.userId },
+        });
+        return { balance: wallet.balance, created: false };
+      }
 
-      if (input.amount < 0 && wallet.balance + input.amount < 0)
-        throw new BadRequestException("insufficient_funds");
+      await this.ensureWalletTx(tx, input.userId);
 
-      const updated = await tx.wallet.update({
+      // Atomic debit: refuse if balance would go negative (closes TOCTOU race).
+      if (input.amount < 0) {
+        const gated = await tx.wallet.updateMany({
+          where: {
+            userId: input.userId,
+            balance: { gte: -input.amount },
+          },
+          data: { balance: { increment: input.amount } },
+        });
+        if (gated.count === 0)
+          throw new BadRequestException("insufficient_funds");
+      }
+      else {
+        await tx.wallet.update({
+          where: { userId: input.userId },
+          data: { balance: { increment: input.amount } },
+        });
+      }
+
+      const updated = await tx.wallet.findUniqueOrThrow({
         where: { userId: input.userId },
-        data: { balance: { increment: input.amount } },
       });
 
       await tx.ledgerEntry.create({
@@ -111,7 +125,7 @@ export class WalletService {
     return this.apply({ ...input, amount: -input.amount });
   }
 
-  /** Winner 90%, house remainder (incl. rounding). */
+  /** Winner 90%, house remainder — both legs in one transaction. */
   async settleMatch(input: {
     matchId: string;
     pot: number;
@@ -123,28 +137,62 @@ export class WalletService {
     const winnerPayout = Math.floor(input.pot * 0.9);
     const rake = input.pot - winnerPayout;
     const houseId = await this.houseUserId();
+    const payoutKey = `payout:${input.matchId}:${input.winnerUserId}`;
+    const rakeKey = `rake:${input.matchId}`;
 
-    if (winnerPayout > 0) {
-      await this.credit({
-        userId: input.winnerUserId,
-        amount: winnerPayout,
-        type: "payout",
-        idempotencyKey: `payout:${input.matchId}:${input.winnerUserId}`,
-        refType: "match",
-        refId: input.matchId,
+    return prisma.$transaction(async (tx) => {
+      const existingPayout = await tx.ledgerEntry.findUnique({
+        where: { idempotencyKey: payoutKey },
       });
-    }
-    if (rake > 0) {
-      await this.credit({
-        userId: houseId,
-        amount: rake,
-        type: "rake",
-        idempotencyKey: `rake:${input.matchId}`,
-        refType: "match",
-        refId: input.matchId,
+      if (!existingPayout && winnerPayout > 0) {
+        await this.ensureWalletTx(tx, input.winnerUserId);
+        await tx.wallet.update({
+          where: { userId: input.winnerUserId },
+          data: { balance: { increment: winnerPayout } },
+        });
+        await tx.ledgerEntry.create({
+          data: {
+            userId: input.winnerUserId,
+            amount: winnerPayout,
+            type: "payout",
+            refType: "match",
+            refId: input.matchId,
+            idempotencyKey: payoutKey,
+          },
+        });
+      }
+
+      const existingRake = await tx.ledgerEntry.findUnique({
+        where: { idempotencyKey: rakeKey },
       });
-    }
-    return { winnerPayout, rake };
+      if (!existingRake && rake > 0) {
+        await this.ensureWalletTx(tx, houseId);
+        await tx.wallet.update({
+          where: { userId: houseId },
+          data: { balance: { increment: rake } },
+        });
+        await tx.ledgerEntry.create({
+          data: {
+            userId: houseId,
+            amount: rake,
+            type: "rake",
+            refType: "match",
+            refId: input.matchId,
+            idempotencyKey: rakeKey,
+          },
+        });
+      }
+
+      return { winnerPayout, rake };
+    });
+  }
+
+  /** True if a match already paid the winner (blocks emergency buy-in refunds). */
+  async hasMatchPayout(matchId: string): Promise<boolean> {
+    const row = await prisma.ledgerEntry.findFirst({
+      where: { refType: "match", refId: matchId, type: "payout" },
+    });
+    return Boolean(row);
   }
 
   private async ensureWalletTx(

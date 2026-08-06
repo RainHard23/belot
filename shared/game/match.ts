@@ -62,7 +62,7 @@ export function createEmptyMatch(dealer: Seat = "p0"): MatchState {
 
 export function startHand(state: MatchState, rng?: () => number): MatchState {
   const deck = shuffle(createDeck(), rng);
-  const { hands, faceUp, stock } = dealInitial(deck);
+  const { hands, faceUp, stock } = dealInitial(deck, state.dealer);
   const firstSpeaker = OTHER_SEAT[state.dealer];
   return {
     ...state,
@@ -296,6 +296,8 @@ export function perspective(state: MatchState, seat: Seat) {
     tricksTaken: state.tricksTaken,
     lastHandSummary: state.lastHandSummary,
     kittyCount: state.kitty.length,
+    /** Remaining undealt stock (face-up is separate). Visible as the table deck. */
+    stockCount: state.stock.length,
     target: 501 as number,
     matchOver: null as null | { winner: Seat; reason: "points" | "bolts" },
     /** Epoch ms when the current turn auto-resolves server-side, or null. */

@@ -19,6 +19,11 @@ export class AnimationQueue {
     this.chain = Promise.resolve();
   }
 
+  /** Bump generation so in-flight scripts stop committing after await. */
+  generation() {
+    return this._generation;
+  }
+
   enqueue(job: Job, label?: string) {
     const gen = this._generation;
     this.chain = this.chain.then(async () => {

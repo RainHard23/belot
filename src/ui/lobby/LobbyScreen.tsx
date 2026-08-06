@@ -140,7 +140,7 @@ export function LobbyScreen({
           )}
         </AnimatePresence>
 
-        <div className="flex min-h-0 flex-1 gap-5 overflow-hidden px-8 pb-4 lg:px-12">
+        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-hidden px-4 pb-4 sm:px-8 lg:flex-row lg:px-12">
           <section className="flex min-w-0 flex-1 flex-col">
             <div className="mb-3 flex flex-wrap items-center gap-2.5">
               <div className="relative min-w-[200px] max-w-[300px] flex-1">
@@ -220,19 +220,10 @@ export function LobbyScreen({
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: Math.min(idx * 0.02, 0.2) }}
-                    role="button"
-                    tabIndex={0}
                     onClick={() => select(t.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        select(t.id);
-                      }
-                    }}
                     className={cn(
                       "grid h-[72px] w-full cursor-pointer items-center gap-2 rounded-[14px] px-5 text-left text-[15px] transition",
                       COL,
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#fca120]",
                       active
                         ? "bg-[#fb9e1d]/[0.09] shadow-[inset_0_0_0_1px_#fca120]"
                         : "bg-[#1a1a1f]/40 hover:bg-white/[0.035]",
@@ -292,16 +283,9 @@ export function LobbyScreen({
                               </Button>
                             )
                           : (
-                              <Button
-                                size="row"
-                                variant="watch"
-                                className="min-w-[110px]"
-                                disabled={!isLive}
-                                title={isLive ? "Скоро" : ru.full}
-                                onClick={e => e.stopPropagation()}
-                              >
-                                {ru.watch}
-                              </Button>
+                              <span className="inline-flex min-w-[110px] items-center justify-center text-[12px] font-semibold text-[#74747c]">
+                                {isLive ? ru.statusLive : ru.full}
+                              </span>
                             )}
                     </span>
                   </motion.div>
@@ -310,7 +294,7 @@ export function LobbyScreen({
             </div>
           </section>
 
-          <aside className="flex w-[min(100%,360px)] shrink-0 flex-col overflow-hidden rounded-[20px] border border-white/[0.06] bg-[#1d1d22]/90 shadow-[0_16px_50px_rgba(0,0,0,0.35)] backdrop-blur-sm">
+          <aside className="hidden w-[min(100%,360px)] shrink-0 flex-col overflow-hidden rounded-[20px] border border-white/[0.06] bg-[#1d1d22]/90 shadow-[0_16px_50px_rgba(0,0,0,0.35)] backdrop-blur-sm lg:flex">
             <div className="px-4 pt-4">
               <div className="mb-1 flex items-start justify-between gap-2">
                 <h3 className="text-[19px] font-bold leading-tight text-white">
@@ -429,35 +413,65 @@ export function LobbyScreen({
                     </Button>
                   )
                 : (
-                    <>
-                      <Button
-                        variant="play"
-                        size="lg"
-                        disabled={
-                          !selected
-                          || selected.filled >= 2
-                          || Boolean(seatedTableId)
-                          || balance < selectedBuyIn
-                        }
-                        onClick={() => {
-                          if (!selected)
-                            return;
-                          if (balance < selectedBuyIn)
-                            setDepositOpen(true);
-                          else
-                            sit(selected.id);
-                        }}
-                      >
-                        {ru.play}
-                      </Button>
-                      <Button variant="default" size="lg" disabled title="Скоро">
-                        {ru.waitingList}
-                      </Button>
-                    </>
+                    <Button
+                      variant="play"
+                      size="lg"
+                      className="col-span-2"
+                      disabled={
+                        !selected
+                        || selected.filled >= 2
+                        || Boolean(seatedTableId)
+                        || balance < selectedBuyIn
+                      }
+                      onClick={() => {
+                        if (!selected)
+                          return;
+                        if (balance < selectedBuyIn)
+                          setDepositOpen(true);
+                        else
+                          sit(selected.id);
+                      }}
+                    >
+                      {ru.play}
+                    </Button>
                   )}
             </div>
           </aside>
         </div>
+
+        {/* Mobile selected-table actions (aside is desktop-only). */}
+        {selected && (
+          <div className="flex shrink-0 gap-2 border-t border-white/[0.06] bg-[#16161a]/95 px-4 py-3 lg:hidden">
+            {seatedTableId === selected.id
+              ? (
+                  <Button variant="secondary" size="lg" className="flex-1" onClick={() => leave(selected.id)}>
+                    {ru.leave}
+                  </Button>
+                )
+              : (
+                  <Button
+                    variant="play"
+                    size="lg"
+                    className="flex-1"
+                    disabled={
+                      selected.filled >= 2
+                      || Boolean(seatedTableId)
+                      || balance < selectedBuyIn
+                    }
+                    onClick={() => {
+                      if (balance < selectedBuyIn)
+                        setDepositOpen(true);
+                      else
+                        sit(selected.id);
+                    }}
+                  >
+                    {ru.play}
+                    {" · "}
+                    {selectedBuyIn}
+                  </Button>
+                )}
+          </div>
+        )}
 
         <footer className="flex h-[48px] shrink-0 items-center justify-between border-t border-white/[0.04] bg-[#0e0e11]/90 px-8 text-[12px] text-[#74747c] backdrop-blur-sm lg:px-12">
           <div className="flex items-center gap-5">

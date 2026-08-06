@@ -9,20 +9,26 @@ import {
 import { legalMoves } from "../trick";
 
 describe("deriveAnimEvents", () => {
-  it("scripts initial deal → face up → bid UI", () => {
+  it("scripts initial 3-3-3-3 deal → face up → bid UI", () => {
     const waiting = createEmptyMatch("p0");
     const dealt = startHand(waiting, () => 0.42);
     const events = deriveAnimEvents(waiting, dealt, "p0");
     expect(events.map(e => e.type)).toEqual([
       "clear_table",
+      // Dealer is p0 → first speaker p1 gets packets 0 and 2; p0 gets 1 and 3
+      "opp_deal",
       "deal",
       "opp_deal",
+      "deal",
       "face_up_show",
       "bid_ui",
     ]);
-    const deal = events.find(e => e.type === "deal");
-    expect(deal && deal.type === "deal" && deal.kind).toBe("initial");
-    expect(deal && deal.type === "deal" && deal.cards).toHaveLength(6);
+    const deals = events.filter(e => e.type === "deal");
+    expect(deals).toHaveLength(2);
+    for (const d of deals) {
+      expect(d.type === "deal" && d.cards).toHaveLength(3);
+      expect(d.type === "deal" && d.kind).toBe("initial");
+    }
   });
 
   it("scripts face-up take + rest deal", () => {

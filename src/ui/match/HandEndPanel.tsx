@@ -1,6 +1,6 @@
 import type { PlayerView, Seat } from "@shared/game";
 import { motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ru } from "@/ui/i18n/ru";
 import { ActionButton } from "@/ui/match/controls/ActionButton";
 
@@ -141,6 +141,14 @@ function ModalShell({ children, wide }: { children: React.ReactNode; wide?: bool
 /** "Next hand" button that also self-advances with a visible countdown ring. */
 function AutoNextButton({ onNext }: { onNext: () => void }) {
   const [remainingMs, setRemainingMs] = useState(AUTO_NEXT_MS);
+  const fired = useRef(false);
+
+  const go = () => {
+    if (fired.current)
+      return;
+    fired.current = true;
+    onNext();
+  };
 
   useEffect(() => {
     const start = Date.now();
@@ -149,7 +157,7 @@ function AutoNextButton({ onNext }: { onNext: () => void }) {
       setRemainingMs(left);
       if (left <= 0) {
         clearInterval(interval);
-        onNext();
+        go();
       }
     }, 100);
     return () => clearInterval(interval);
@@ -159,7 +167,7 @@ function AutoNextButton({ onNext }: { onNext: () => void }) {
   const pct = (remainingMs / AUTO_NEXT_MS) * 100;
 
   return (
-    <ActionButton variant="primary" size="lg" onClick={onNext} className="relative overflow-hidden">
+    <ActionButton variant="primary" size="lg" onClick={go} className="relative overflow-hidden">
       <span
         className="pointer-events-none absolute inset-y-0 left-0 bg-black/15"
         style={{ width: `${100 - pct}%`, transition: "width 100ms linear" }}

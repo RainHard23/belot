@@ -110,6 +110,7 @@ export function scoreHand(input: {
   };
 
   // Tie on points → compare raw (подпункты); loser gets bolt, winner takes ochki without kitty
+  let tieBoltLoser: Seat | null = null;
   if (pts.p0 === pts.p1 && !failed) {
     if (finalRaw.p0 !== finalRaw.p1) {
       const loser: Seat = finalRaw.p0 < finalRaw.p1 ? "p0" : "p1";
@@ -119,6 +120,7 @@ export function scoreHand(input: {
         = cardPoints.p0 + cardPoints.p1 + declPts.p0 + declPts.p1 + kittyPoints;
       finalRaw[loser] = 0;
       bolts[loser] += 1;
+      tieBoltLoser = loser;
       if (bolts[loser] >= 3)
         totals[loser] -= 10;
       pts = {
@@ -139,7 +141,7 @@ export function scoreHand(input: {
         kittyShare: kittyTo === "p0" ? kittyPoints : 0,
         totalRaw: finalRaw.p0,
         points: pts.p0,
-        bolt: failed && taker === "p0",
+        bolt: (failed && taker === "p0") || tieBoltLoser === "p0",
         annulledDeclarations: annulled.filter(d => d.seat === "p0"),
       },
       p1: {
@@ -148,7 +150,7 @@ export function scoreHand(input: {
         kittyShare: kittyTo === "p1" ? kittyPoints : 0,
         totalRaw: finalRaw.p1,
         points: pts.p1,
-        bolt: failed && taker === "p1",
+        bolt: (failed && taker === "p1") || tieBoltLoser === "p1",
         annulledDeclarations: annulled.filter(d => d.seat === "p1"),
       },
     },

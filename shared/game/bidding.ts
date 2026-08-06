@@ -71,12 +71,11 @@ export function applyBid(
     return { error: "invalid_round1_action" };
   }
 
-  // round 2
+  // round 2 (legacy applyBid — kept for parity; match uses applyBidFixed)
   if (action.type === "pass") {
-    const passes = state.passes + 1;
-    if (passes >= 2)
-      return { redeal: true };
-    return { ...state, passes, turn: OTHER_SEAT[seat] };
+    if (state.passes >= 1)
+      return { error: "must_choose" };
+    return { ...state, passes: state.passes + 1, turn: OTHER_SEAT[seat] };
   }
   if (action.type === "choose") {
     if (action.suit === state.faceUpSuit) {
@@ -123,10 +122,11 @@ export function applyBidFixed(
   }
 
   if (action.type === "pass") {
-    const passes = state.passes + 1;
-    if (passes >= 2)
-      return { redeal: true };
-    return { ...state, passes, turn: OTHER_SEAT[seat] };
+    // Round 2: non-dealer (firstSpeaker) may still pass; the dealer then
+    // *must* name a suit — no redeal.
+    if (seat !== firstSpeaker)
+      return { error: "must_choose" };
+    return { ...state, passes: state.passes + 1, turn: OTHER_SEAT[seat] };
   }
   if (action.type === "choose") {
     if (action.suit === state.faceUpSuit)

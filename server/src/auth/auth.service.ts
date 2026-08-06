@@ -139,18 +139,20 @@ export class AuthService {
     if (!row)
       throw new UnauthorizedException("Сессия истекла — войдите снова");
 
-    await prisma.refreshToken.update({
-      where: { id: row.id },
-      data: { revokedAt: new Date() },
-    });
-
+    // Issue new tokens *before* revoking the old refresh — a crash mid-refresh
+    // must not lock the user out with a revoked-but-unreplaced token.
     const balance = row.user.wallet?.balance ?? 0;
-    return this.issueTokens(
+    const tokens = await this.issueTokens(
       row.user.id,
       row.user.email,
       row.user.displayName,
       balance,
     );
+    await prisma.refreshToken.update({
+      where: { id: row.id },
+      data: { revokedAt: new Date() },
+    });
+    return tokens;
   }
 
   async logout(refreshToken?: string) {

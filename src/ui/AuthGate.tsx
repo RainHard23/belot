@@ -172,18 +172,13 @@ function Tab({
       type="button"
       onClick={onClick}
       className={cn(
-        "relative h-11 rounded-[11px] text-sm font-semibold transition",
-        active ? "text-[#1a1208]" : "text-[#74747c] hover:text-[#cfcfd4]",
+        "relative h-11 rounded-[11px] text-sm font-semibold transition-colors",
+        active
+          ? "bg-[linear-gradient(180deg,#fea929_0%,#f38300_100%)] text-[#1a1208] shadow-[0_4px_16px_rgba(251,158,29,0.35)]"
+          : "text-[#74747c] hover:text-[#cfcfd4]",
       )}
     >
-      {active && (
-        <motion.span
-          layoutId="auth-tab"
-          className="absolute inset-0 rounded-[11px] bg-[linear-gradient(180deg,#fea929_0%,#f38300_100%)] shadow-[0_4px_16px_rgba(251,158,29,0.35)]"
-          transition={{ type: "spring", stiffness: 380, damping: 28 }}
-        />
-      )}
-      <span className="relative z-10">{label}</span>
+      {label}
     </button>
   );
 }

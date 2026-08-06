@@ -27,8 +27,16 @@ export const bot = new BotService(matches, turnTimer);
 matches.setDeadlineProvider(matchId => turnTimer.deadlineFor(matchId));
 turnTimer.setBotPoke((matchId, server) => bot.poke(matchId, server));
 
+matches.setPersistMeta((match) => {
+  const table = lobby.get(match.tableId);
+  return {
+    tableName: table?.name,
+    paidSessionIds: table ? [...table.paidSessions] : [],
+  };
+});
+
 matches.setSettleHook(async (match) => {
-  if (match.settled || match.practice || match.pot <= 0)
+  if (match.settled || match.settling || match.practice || match.pot <= 0)
     return;
   const winner = matches.matchWinner(match);
   if (!winner)
@@ -36,18 +44,26 @@ matches.setSettleHook(async (match) => {
   const winnerSeat = match.seats.find(s => s.seat === winner.seat);
   if (!winnerSeat?.userId || isBotSession(winnerSeat.sessionId)) {
     match.settled = true;
+    lobby.clearAllPaid(match.tableId);
     return;
   }
-  match.settled = true;
+  // Mark settling *before* await so a crash mid-payout still leaves the
+  // Postgres snapshot intact (settled stays false → restore on reboot).
+  match.settling = true;
   try {
     await wallet.settleMatch({
       matchId: match.id,
       pot: match.pot,
       winnerUserId: winnerSeat.userId,
     });
+    match.settled = true;
+    lobby.clearAllPaid(match.tableId);
   }
   catch (err) {
     console.error("settleHook failed", err);
-    match.settled = false;
+    // Keep unsettled so leave/ensureMatchSettled can retry or emergency-refund.
+  }
+  finally {
+    match.settling = false;
   }
 });

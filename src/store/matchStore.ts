@@ -11,6 +11,9 @@ import {
 } from "@/ui/motion/playMatchAnimScript";
 import { getSocket } from "../net/socket";
 
+/** How long a table reaction stays visible before fading out. */
+const REACTION_TTL_MS = 2_400;
+
 export interface SeatReaction {
   kind: EmoteKind;
   ts: number;
@@ -34,6 +37,67 @@ interface MatchState {
   clearError: () => void;
 }
 
+const reactionTimers = new Map<Seat, ReturnType<typeof setTimeout>>();
+
+/** Bound match socket handlers — removed by identity so lobby's match:ended stays. */
+let onMatchState: ((payload: {
+  matchId: string;
+  view: PlayerView;
+  players: { seat: Seat; name: string }[];
+  anim?: MatchAnimEvent[];
+  snap?: boolean;
+}) => void) | null = null;
+let onMatchEnded: ((payload: { matchId: string; reason?: string }) => void) | null = null;
+let onMatchEmote: ((payload: EmotePayload) => void) | null = null;
+
+function unbindMatchSocket() {
+  const s = getSocket();
+  if (onMatchState)
+    s.off("match:state", onMatchState);
+  if (onMatchEnded)
+    s.off("match:ended", onMatchEnded);
+  if (onMatchEmote)
+    s.off("match:emote", onMatchEmote);
+  onMatchState = null;
+  onMatchEnded = null;
+  onMatchEmote = null;
+}
+
+function clearReactionTimer(seat: Seat) {
+  const t = reactionTimers.get(seat);
+  if (t)
+    clearTimeout(t);
+  reactionTimers.delete(seat);
+}
+
+function clearAllReactionTimers() {
+  for (const t of reactionTimers.values())
+    clearTimeout(t);
+  reactionTimers.clear();
+}
+
+function scheduleReactionClear(
+  seat: Seat,
+  ts: number,
+  set: (fn: (s: MatchState) => Partial<MatchState>) => void,
+) {
+  clearReactionTimer(seat);
+  reactionTimers.set(
+    seat,
+    setTimeout(() => {
+      reactionTimers.delete(seat);
+      set((state) => {
+        const cur = state.reactions[seat];
+        if (!cur || cur.ts !== ts)
+          return {};
+        const next = { ...state.reactions };
+        delete next[seat];
+        return { reactions: next };
+      });
+    }, REACTION_TTL_MS),
+  );
+}
+
 export const useMatchStore = create<MatchState>((set, get) => ({
   matchId: null,
   committed: null,
@@ -45,6 +109,8 @@ export const useMatchStore = create<MatchState>((set, get) => ({
   join: (matchId) => {
     const s = getSocket();
     matchAnimQueue.reset();
+    clearAllReactionTimers();
+    unbindMatchSocket();
     set({
       matchId,
       committed: null,
@@ -55,50 +121,50 @@ export const useMatchStore = create<MatchState>((set, get) => ({
       reactions: {},
     });
     s.emit("match:join", { matchId }, (res: { error?: string }) => {
-      if (res?.error)
-        set({ error: errText(res.error) });
+      if (res?.error) {
+        try {
+          if (res.error === "no_match" || res.error === "not_seated")
+            sessionStorage.removeItem("bilot_active_match");
+        }
+        catch { /* ignore */ }
+        set({
+          error: errText(res.error),
+          endedReason: res.error === "no_match" || res.error === "not_seated"
+            ? "ended"
+            : get().endedReason,
+        });
+      }
     });
-    s.off("match:state");
-    s.off("match:ended");
-    s.off("match:emote");
-    s.on("match:emote", (payload: EmotePayload) => {
+    onMatchEmote = (payload: EmotePayload) => {
       if (payload.matchId !== get().matchId)
         return;
       set(state => ({
         reactions: { ...state.reactions, [payload.seat]: { kind: payload.kind, ts: payload.ts } },
       }));
-    });
-    s.on(
-      "match:state",
-      (payload: {
-        matchId: string;
-        view: PlayerView;
-        players: { seat: Seat; name: string }[];
-        anim?: MatchAnimEvent[];
-        snap?: boolean;
-      }) => {
-        if (payload.matchId !== get().matchId)
-          return;
+      scheduleReactionClear(payload.seat, payload.ts, set);
+    };
+    onMatchState = (payload) => {
+      if (payload.matchId !== get().matchId)
+        return;
 
-        set({ players: payload.players, committed: payload.view, error: null });
+      set({ players: payload.players, committed: payload.view, error: null });
 
-        playMatchAnimScript({
-          anim: payload.anim ?? [],
-          nextView: payload.view,
-          snap: payload.snap === true,
-          setDisplay: (patch) => {
-            set((state) => {
-              const nextPatch
-                = typeof patch === "function" ? patch(state.display) : patch;
-              return {
-                display: { ...state.display, ...nextPatch },
-              };
-            });
-          },
-        });
-      },
-    );
-    s.on("match:ended", (payload: { matchId: string; reason?: string }) => {
+      playMatchAnimScript({
+        anim: payload.anim ?? [],
+        nextView: payload.view,
+        snap: payload.snap === true,
+        setDisplay: (patch) => {
+          set((state) => {
+            const nextPatch
+              = typeof patch === "function" ? patch(state.display) : patch;
+            return {
+              display: { ...state.display, ...nextPatch },
+            };
+          });
+        },
+      });
+    };
+    onMatchEnded = (payload) => {
       if (payload.matchId !== get().matchId)
         return;
       set({
@@ -106,7 +172,10 @@ export const useMatchStore = create<MatchState>((set, get) => ({
           ? "opponent_left"
           : "ended",
       });
-    });
+    };
+    s.on("match:emote", onMatchEmote);
+    s.on("match:state", onMatchState);
+    s.on("match:ended", onMatchEnded);
   },
   bid: (action) => {
     const matchId = get().matchId;
@@ -131,7 +200,8 @@ export const useMatchStore = create<MatchState>((set, get) => ({
     if (!matchId || get().display.animBusy)
       return;
     getSocket().emit("match:nextHand", { matchId }, (res: { error?: string }) => {
-      if (res?.error)
+      // Both clients may race auto-next — ignore expected phase errors.
+      if (res?.error && res.error !== "wrong_phase" && res.error !== "match_over")
         set({ error: errText(res.error) });
     });
   },
@@ -140,12 +210,14 @@ export const useMatchStore = create<MatchState>((set, get) => ({
     if (!matchId)
       return;
     getSocket().emit("match:emote", { matchId, kind }, (res: { error?: string }) => {
-      if (res?.error)
+      if (res?.error && res.error !== "rate_limited")
         set({ error: errText(res.error) });
     });
   },
   clear: () => {
     matchAnimQueue.reset();
+    clearAllReactionTimers();
+    unbindMatchSocket();
     set({
       matchId: null,
       committed: null,

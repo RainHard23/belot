@@ -59,6 +59,9 @@ export class SessionService {
     if (this.sessions.has(id)) {
       const existing = this.sessions.get(id)!;
       existing.userId = userId;
+      const next = sanitizeName(name);
+      if (next)
+        existing.name = next;
       return existing;
     }
     return this.create(name, userId);

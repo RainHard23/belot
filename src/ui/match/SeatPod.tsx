@@ -7,8 +7,30 @@ import { emitAmbient } from "@/ui/match/ambientBus";
 
 const RING_R = 38;
 const RING_C = 2 * Math.PI * RING_R;
-/** Below this many ms left, the ring turns red and ticks faster-feeling. */
+/** Below this many ms left, the ring / digits turn red. */
 const URGENT_MS = 5_000;
+
+/** Live countdown seconds remaining until `deadlineAt` (epoch ms). */
+function useSecondsLeft(deadlineAt: number | null | undefined, active: boolean) {
+  const [leftMs, setLeftMs] = useState(() =>
+    active && typeof deadlineAt === "number"
+      ? Math.max(0, deadlineAt - Date.now())
+      : null,
+  );
+
+  useEffect(() => {
+    if (!active || typeof deadlineAt !== "number") {
+      setLeftMs(null);
+      return;
+    }
+    const tick = () => setLeftMs(Math.max(0, deadlineAt - Date.now()));
+    tick();
+    const id = window.setInterval(tick, 200);
+    return () => window.clearInterval(id);
+  }, [active, deadlineAt]);
+
+  return leftMs;
+}
 
 export function SeatPod({
   name,
@@ -38,12 +60,17 @@ export function SeatPod({
   turnDeadlineAt?: number | null;
 }) {
   const src = you ? ASSETS.avatarDefault : avatarUrl(name);
-  const size = compact ? 56 : 72;
+  const size = compact ? 72 : 88;
   const [turnKey, setTurnKey] = useState(0);
   const wasActiveRef = useRef(false);
   const timedOutRef = useRef(false);
   const prevTricksRef = useRef(tricks);
   const [trickFlash, setTrickFlash] = useState(false);
+  const leftMs = useSecondsLeft(turnDeadlineAt, !!active);
+  const secs = leftMs != null ? Math.ceil(leftMs / 1000) : null;
+  const urgent = leftMs != null && leftMs <= URGENT_MS;
+  /** Frozen at turn start so the ring animation isn't restarted every tick. */
+  const ringMsRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (tricks > prevTricksRef.current) {
@@ -59,18 +86,28 @@ export function SeatPod({
     if (active && !wasActiveRef.current) {
       setTurnKey(k => k + 1);
       timedOutRef.current = false;
+      ringMsRef.current = typeof turnDeadlineAt === "number"
+        ? Math.max(0, turnDeadlineAt - Date.now())
+        : 14_000;
       if (you)
         emitAmbient("turn_start");
     }
+    if (!active)
+      ringMsRef.current = null;
     wasActiveRef.current = !!active;
-  }, [active, you]);
+  }, [active, you, turnDeadlineAt]);
 
+  // If deadline arrives after the seat already became active, seed the ring once.
+  useEffect(() => {
+    if (active && typeof turnDeadlineAt === "number" && ringMsRef.current == null)
+      ringMsRef.current = Math.max(0, turnDeadlineAt - Date.now());
+  }, [active, turnDeadlineAt]);
+
+  const ringDurationSec = (ringMsRef.current ?? 14_000) / 1000;
   const hasDeadline = active && typeof turnDeadlineAt === "number";
-  const durationMs = hasDeadline ? Math.max(0, turnDeadlineAt! - Date.now()) : null;
 
-  // Fire a local "timeout" cue once the visible ring empties, purely as a UX
-  // beat — the server is the actual authority and will broadcast whatever it
-  // decided a moment later via the normal match:state flow.
+  // Fire a local "timeout" cue once the visible clock empties — server is
+  // still the authority and will broadcast the auto-action shortly after.
   useEffect(() => {
     if (!hasDeadline || !you || timedOutRef.current)
       return;
@@ -82,13 +119,37 @@ export function SeatPod({
     return () => clearTimeout(t);
   }, [hasDeadline, turnDeadlineAt, you]);
 
+  const timerBadge = secs != null && (
+    <motion.div
+      key={`timer-${turnKey}`}
+      initial={{ scale: 0.85, opacity: 0 }}
+      animate={{ scale: urgent && secs <= 5 ? [1, 1.08, 1] : 1, opacity: 1 }}
+      transition={
+        urgent && secs <= 5
+          ? { repeat: Infinity, duration: 0.55 }
+          : { type: "spring", stiffness: 320, damping: 20 }
+      }
+      className={cn(
+        "min-w-[3.2rem] rounded-[12px] border px-2.5 py-1 text-center font-extrabold tabular-nums shadow-lg backdrop-blur-md",
+        urgent
+          ? "border-rose-400/60 bg-rose-950/90 text-rose-200"
+          : "border-[var(--accent)]/50 bg-black/80 text-[var(--accent)]",
+      )}
+      aria-live="polite"
+      aria-label={`Осталось ${secs} секунд`}
+    >
+      <div className="text-[10px] font-bold uppercase tracking-[0.12em] opacity-70">ход</div>
+      <div className="text-[22px] leading-none">{secs}</div>
+    </motion.div>
+  );
+
   return (
     <motion.div
       initial={false}
       animate={{ scale: 1, opacity: 1, y: 0 }}
       transition={{ type: "spring", stiffness: 280, damping: 18 }}
       className={cn(
-        "relative z-30 flex flex-col items-center gap-2",
+        "relative z-30 flex flex-col items-center gap-1.5",
         position === "top" ? "flex-col" : "flex-col-reverse",
       )}
     >
@@ -99,12 +160,29 @@ export function SeatPod({
             initial={{ opacity: 0, y: 8, scale: 0.6 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.5 }}
-            className="pointer-events-none absolute -top-3 left-1/2 z-40 -translate-x-1/2 text-2xl drop-shadow-lg"
+            className={cn(
+              "pointer-events-none absolute left-1/2 z-40 -translate-x-1/2 text-2xl drop-shadow-lg",
+              position === "top" ? "-top-2" : "-top-3",
+            )}
           >
             {reaction.kind}
           </motion.div>
         )}
       </AnimatePresence>
+
+      {position === "top" && (
+        <div className="relative flex items-center gap-2">
+          <div className="min-w-[112px] rounded-[12px] border border-white/[0.06] bg-[#121316]/92 px-3 py-1 text-center shadow-lg backdrop-blur-md">
+            <div className="truncate text-[13px] font-bold tracking-tight text-white">{name}</div>
+            <div className="text-[10px] font-semibold text-[var(--accent)]">
+              {tricks}
+              {" "}
+              взятки
+            </div>
+          </div>
+          {timerBadge}
+        </div>
+      )}
 
       <AnimatePresence>
         {declarations && declarations.length > 0 && (
@@ -127,8 +205,8 @@ export function SeatPod({
       </AnimatePresence>
 
       <div className="relative" style={{ width: size, height: size }}>
-        {/* Turn ring — real server deadline once known, cosmetic spin otherwise */}
-        {active && (
+        {/* Ring only when a real server deadline exists (no fake 14s for bots). */}
+        {hasDeadline && (
           <svg
             key={turnKey}
             className="pointer-events-none absolute -inset-[7px]"
@@ -149,14 +227,14 @@ export function SeatPod({
               cy="48"
               r={RING_R}
               fill="none"
-              stroke={durationMs !== null && durationMs < URGENT_MS ? "#ff4d4d" : "var(--accent)"}
-              strokeWidth="4"
+              stroke={urgent ? "#ff4d4d" : "var(--accent)"}
+              strokeWidth="5"
               strokeLinecap="round"
               strokeDasharray={RING_C}
               transform="rotate(-90 48 48)"
               initial={{ strokeDashoffset: 0 }}
               animate={{ strokeDashoffset: RING_C }}
-              transition={{ duration: (durationMs ?? 14_000) / 1000, ease: "linear" }}
+              transition={{ duration: ringDurationSec, ease: "linear" }}
             />
           </svg>
         )}
@@ -200,27 +278,32 @@ export function SeatPod({
         )}
       </div>
 
-      <div className="relative min-w-[128px] rounded-[12px] border border-white/[0.06] bg-[#121316]/92 px-3.5 py-1.5 text-center shadow-lg backdrop-blur-md">
-        <div className="truncate text-[14px] font-bold tracking-tight text-white">{name}</div>
-        <div className="text-[11px] font-semibold text-[var(--accent)]">
-          {tricks}
-          {" "}
-          взятки
+      {position === "bottom" && (
+        <div className="relative flex items-center gap-2">
+          <div className="min-w-[128px] rounded-[12px] border border-white/[0.06] bg-[#121316]/92 px-3.5 py-1.5 text-center shadow-lg backdrop-blur-md">
+            <div className="truncate text-[14px] font-bold tracking-tight text-white">{name}</div>
+            <div className="text-[11px] font-semibold text-[var(--accent)]">
+              {tricks}
+              {" "}
+              взятки
+            </div>
+            <AnimatePresence>
+              {trickFlash && (
+                <motion.span
+                  key={tricks}
+                  initial={{ opacity: 0, y: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, y: -14, scale: 1.15 }}
+                  exit={{ opacity: 0 }}
+                  className="pointer-events-none absolute right-2 top-0 text-sm font-extrabold text-[var(--accent-strong)]"
+                >
+                  +1
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </div>
+          {timerBadge}
         </div>
-        <AnimatePresence>
-          {trickFlash && (
-            <motion.span
-              key={tricks}
-              initial={{ opacity: 0, y: 0, scale: 0.8 }}
-              animate={{ opacity: 1, y: -14, scale: 1.15 }}
-              exit={{ opacity: 0 }}
-              className="pointer-events-none absolute right-2 top-0 text-sm font-extrabold text-[var(--accent-strong)]"
-            >
-              +1
-            </motion.span>
-          )}
-        </AnimatePresence>
-      </div>
+      )}
     </motion.div>
   );
 }

@@ -8,7 +8,7 @@ import {
   refresh as apiRefresh,
   register as apiRegister,
 } from "@/net/authApi";
-import { disconnectSocket, resetSocket } from "@/net/socket";
+import { disconnectSocket, resetSocket, setAuthErrorHandler, updateSocketAuth } from "@/net/socket";
 
 const TOKEN_KEY = "bilot_token";
 const REFRESH_KEY = "bilot_refresh";
@@ -158,7 +158,7 @@ export const useAuthStore = create<AuthState>(set => ({
     try {
       const res = await apiRefresh(refreshToken);
       persist(res.accessToken, res.refreshToken, res.user);
-      resetSocket(res.accessToken, res.user.displayName);
+      updateSocketAuth(res.accessToken, res.user.displayName);
       set({
         token: res.accessToken,
         refreshToken: res.refreshToken,
@@ -214,3 +214,7 @@ export const useAuthStore = create<AuthState>(set => ({
 
   clearError: () => set({ error: null }),
 }));
+
+setAuthErrorHandler(() => {
+  void useAuthStore.getState().refreshAccess();
+});

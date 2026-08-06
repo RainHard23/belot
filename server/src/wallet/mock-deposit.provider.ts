@@ -22,25 +22,39 @@ export class MockDepositProvider implements DepositProvider {
     if (!Number.isFinite(amount) || amount < MIN || amount > MAX)
       throw new BadRequestException(`Сумма от ${MIN} до ${MAX} коинов`);
 
+    // Pending first — credit, then confirm. Failed credit leaves unpaid order.
     const order = await prisma.depositOrder.create({
       data: {
         userId: input.userId,
         amountExpected: amount,
         amountReceived: amount,
         provider: this.name,
-        status: "confirmed",
+        status: "pending",
         externalRef: `mock:${randomUUID()}`,
-        confirmedAt: new Date(),
       },
     });
 
-    await this.wallet.credit({
-      userId: input.userId,
-      amount,
-      type: "deposit_mock",
-      idempotencyKey: `deposit_mock:${order.id}`,
-      refType: "deposit",
-      refId: order.id,
+    try {
+      await this.wallet.credit({
+        userId: input.userId,
+        amount,
+        type: "deposit_mock",
+        idempotencyKey: `deposit_mock:${order.id}`,
+        refType: "deposit",
+        refId: order.id,
+      });
+    }
+    catch (err) {
+      await prisma.depositOrder.update({
+        where: { id: order.id },
+        data: { status: "failed" },
+      });
+      throw err;
+    }
+
+    await prisma.depositOrder.update({
+      where: { id: order.id },
+      data: { status: "confirmed", confirmedAt: new Date() },
     });
 
     return { orderId: order.id, status: "confirmed" as const };

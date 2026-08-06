@@ -32,7 +32,6 @@ export function ScorePanel({
         </div>
       </div>
 
-      {/* Progress toward `target` — the leading score fills the bar. */}
       <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
         <div
           className="h-full rounded-full bg-[var(--accent)] transition-[width]"
@@ -56,17 +55,6 @@ export function ScorePanel({
           </span>
         </span>
       </div>
-      {view.trump && (
-        <div className="rounded-[10px] border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5 text-[12px]">
-          <span className="text-[var(--muted)]">{ru.trump}</span>
-          {" "}
-          <span className="font-bold text-[var(--accent)]">
-            {ru.suitSym[view.trump]}
-            {" "}
-            {ru.suits[view.trump]}
-          </span>
-        </div>
-      )}
     </Panel>
   );
 }

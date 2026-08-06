@@ -1,0 +1,57 @@
+HOW TO RUN BELOTE
+=================
+
+Install ONCE (then never again):
+  1) Node.js LTS  — https://nodejs.org  (LTS button)
+  2) Docker Desktop — https://www.docker.com/products/docker-desktop/
+     After install, Docker must be RUNNING (whale icon in the tray).
+
+Start:
+  • Windows — double-click START.bat
+  • Mac     — double-click START.command
+    (first time on Mac: right-click → Open if macOS blocks it)
+
+What START does for you:
+  • starts Postgres in Docker
+  • installs dependencies (first run may take a few minutes)
+  • creates DB + user admin / admin
+  • starts server + client and opens the browser
+
+Login:
+  user:     admin
+  password: admin
+
+Play vs bot:
+  Lobby button "Play with bot" / "Играть с ботом" — free practice, starts immediately.
+
+URL: http://localhost:5173
+
+Stop:
+  • Windows — STOP.bat
+  • Mac     — STOP.command  (or Ctrl+C in the START window)
+
+Two players on one PC:
+  two browser tabs (or normal + incognito), different accounts,
+  or one admin + bot.
+
+If START says Node / Docker not found —
+install them, start Docker Desktop, run START.bat again.
+
+--- Mac: if START.command will not open ---
+Open Terminal, drag the project folder in, run:
+
+  chmod +x START.command STOP.command
+
+Then double-click START.command again.
+
+Russian copies of the same files also exist:
+  ЗАПУСК.bat / СТОП.bat / КАК ЗАПУСТИТЬ.txt
+
+--- If START says "Server did not start" ---
+1. Docker Desktop must be RUNNING (whale icon). Without it Postgres
+   on port 5433 never starts, and NestJS dies with a DB connection error.
+2. Close old Belote windows, run STOP.bat, then START.bat again.
+3. Open the "Belote Server" window — the real error is printed there.
+4. Or open server-start.log in the project folder.
+5. Nuclear fix: delete folders node_modules and server\node_modules,
+   then run START.bat again (it will reinstall).
