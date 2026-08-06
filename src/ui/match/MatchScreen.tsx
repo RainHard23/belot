@@ -1,5 +1,5 @@
 import type { Suit } from "@shared/game";
-import type { RoomQuality, RoomStyle } from "@/store/settingsStore";
+import type { RoomQuality, RoomStyle, TableThemeId } from "@/store/settingsStore";
 import { legalMoves, SUITS } from "@shared/game";
 import { HelpCircle, Menu, Settings, Volume2, VolumeX, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -23,6 +23,7 @@ import { KittyStack } from "./KittyStack";
 import { PlayingCard } from "./PlayingCard";
 import { LegacyBackdrop } from "./room/LegacyBackdrop";
 import { RoomStage } from "./room/RoomStage";
+import { SceneBackdrop } from "./room/SceneBackdrop";
 import { ScorePanel } from "./ScorePanel";
 import { SeatPod } from "./SeatPod";
 import { gridTemplateRows, useStageRows } from "./stageLayout";
@@ -35,6 +36,13 @@ const TABLE_THEMES = [
   { id: "emerald", label: "Изумруд", swatch: "#1f6b4f" },
   { id: "burgundy", label: "Бордо", swatch: "#7c2338" },
 ] as const;
+
+/** Full painted scenes — third settings row (`roomStyle: "scene"`). */
+const SCENE_THEMES = [
+  { id: "tavern", label: "Таверна", swatch: "linear-gradient(135deg,#6b3d28,#d4b896)" },
+] as const;
+
+type ThemeSwatch = { id: string; label: string; swatch: string };
 
 const HAND_SIZE_MAP = { sm: "md", md: "lg", lg: "xl" } as const;
 
@@ -51,11 +59,11 @@ function ThemeRow({
   onPick,
   onStyle,
 }: {
-  themes: typeof TABLE_THEMES;
+  themes: readonly ThemeSwatch[];
   theme: string;
   activeStyle: RoomStyle;
   rowStyle: RoomStyle;
-  onPick: (t: (typeof TABLE_THEMES)[number]["id"]) => void;
+  onPick: (t: string) => void;
   onStyle: (v: RoomStyle) => void;
 }) {
   return (
@@ -66,7 +74,13 @@ function ThemeRow({
           <button
             key={t.id}
             type="button"
-            title={rowStyle === "legacy" ? `${t.label} — старый фон` : t.label}
+            title={
+              rowStyle === "legacy"
+                ? `${t.label} — старый фон`
+                : rowStyle === "scene"
+                  ? `${t.label} — сцена 1:1`
+                  : t.label
+            }
             onClick={() => {
               onPick(t.id);
               onStyle(rowStyle);
@@ -92,6 +106,33 @@ const ROOM_QUALITY_OPTIONS = [
   { id: "medium", label: "Среднее" },
   { id: "low", label: "Низкое" },
 ] as const satisfies readonly { id: RoomQuality; label: string }[];
+
+/** Full-bleed layer behind the stage grid (must span every track). */
+const STAGE_BG_STYLE = { gridColumn: "1 / -1", gridRow: "1 / -1" } as const;
+
+function MatchRoom({
+  theme,
+  roomStyle,
+  roomQuality,
+}: {
+  theme: TableThemeId;
+  roomStyle: RoomStyle;
+  roomQuality: RoomQuality;
+}) {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
+      style={STAGE_BG_STYLE}
+    >
+      {roomStyle === "scene"
+        ? <SceneBackdrop theme={theme} />
+        : roomStyle === "legacy"
+          ? <LegacyBackdrop theme={theme} />
+          : <RoomStage theme={theme} quality={roomQuality} />}
+    </div>
+  );
+}
 
 export function MatchScreen({
   matchId,
@@ -140,6 +181,19 @@ export function MatchScreen({
   const [showMobilePanels, setShowMobilePanels] = useState(false);
   const [selectedCardIdx, setSelectedCardIdx] = useState<number | null>(null);
   const matchOverAnnouncedRef = useRef(false);
+
+  // Lock document scroll for the whole match — log/panel scrolls must not
+  // drag the stage (scrollIntoView / overscroll chaining).
+  useEffect(() => {
+    const prevHtml = document.documentElement.style.overflow;
+    const prevBody = document.body.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.documentElement.style.overflow = prevHtml;
+      document.body.style.overflow = prevBody;
+    };
+  }, []);
   // Touch/coarse pointers (phones, tablets) get two-tap-to-play below instead
   // of the desktop single-click — `whileHover` lift means nothing without a
   // mouse, so a direct tap would otherwise play a card the instant it's
@@ -267,10 +321,10 @@ export function MatchScreen({
         data-table-theme={theme}
         className="relative flex min-h-screen flex-col items-center justify-center gap-3 overflow-hidden bg-[#0e0e11] text-white"
       >
-        {roomStyle === "legacy"
-          ? <LegacyBackdrop theme={theme} />
-          : <RoomStage theme={theme} quality={roomQuality} />}
-        <AmbientOverlay />
+        <MatchRoom theme={theme} roomStyle={roomStyle} roomQuality={roomQuality} />
+        <div className="pointer-events-none absolute inset-0 z-[1]">
+          <AmbientOverlay />
+        </div>
         <div className="relative z-10 text-lg font-semibold">{ru.loadingTable}</div>
         {error && <div className="relative z-10 text-sm text-rose-300">{error}</div>}
         <button type="button" className="relative z-10 text-sm text-[var(--accent)]" onClick={onLeave}>
@@ -305,11 +359,12 @@ export function MatchScreen({
     </>
   );
 
-  /** Rendered in the dock row normally, over the felt on compact stages. */
+  /** Overlaid just above the hand fan during bidding. */
   const bidBar = bidding && myTurn && (
     <motion.div
-      initial={{ y: 16, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.15 }}
       className="flex flex-wrap items-center justify-center gap-2 rounded-[18px] border border-white/[0.08] bg-[#1d1d22]/92 p-2.5 shadow-[0_20px_50px_rgba(0,0,0,0.55)] backdrop-blur-xl"
     >
       {view.phase === "bidding1" && (
@@ -342,13 +397,13 @@ export function MatchScreen({
   return (
     <div
       data-table-theme={theme}
-      className="relative grid h-dvh max-h-dvh overflow-hidden bg-[#02060f] font-[Nunito,sans-serif] text-white"
+      className="relative grid h-dvh max-h-dvh overflow-hidden overscroll-none bg-[#02060f] font-[Nunito,sans-serif] text-white"
       style={{ gridTemplateRows: gridTemplateRows(stageRows.hud, stageRows.hand) }}
     >
-      {roomStyle === "legacy"
-        ? <LegacyBackdrop theme={theme} />
-        : <RoomStage theme={theme} quality={roomQuality} />}
-      <AmbientOverlay />
+      <MatchRoom theme={theme} roomStyle={roomStyle} roomQuality={roomQuality} />
+      <div className="pointer-events-none absolute inset-0 z-[1]" style={STAGE_BG_STYLE}>
+        <AmbientOverlay />
+      </div>
 
       {/* aria-live phase announcer — screen readers hear phase/turn changes
         * without us needing a second visible element for it. */}
@@ -420,20 +475,6 @@ export function MatchScreen({
           <IconButton label="Горячие клавиши (?)" active={showHotkeys} onClick={() => setShowHotkeys(v => !v)}>
             <HelpCircle size={16} />
           </IconButton>
-          <SettingsPopover
-            theme={theme}
-            onTheme={setTheme}
-            soundOn={soundOn}
-            onSoundOn={setSoundOn}
-            soundVolume={soundVolume}
-            onSoundVolume={setSoundVolume}
-            hintsOn={hintsOn}
-            onHintsOn={setHintsOn}
-            roomQuality={roomQualitySetting}
-            onRoomQuality={setRoomQuality}
-            roomStyle={roomStyle}
-            onRoomStyle={setRoomStyle}
-          />
         </div>
       </header>
 
@@ -464,26 +505,26 @@ export function MatchScreen({
         </div>
       )}
 
-      {/* Row 2: opponent seat pod */}
-      <div className="relative z-30 flex justify-center pt-1">
-        <SeatPod
-          compact={stageRows.compact}
-          key={`opp-${display.seatEpoch}-${opp?.name}`}
-          name={opp?.name ?? "Соперник"}
-          active={view.turn === oppSeat}
-          tricks={view.tricksTaken[oppSeat]}
-          isDealer={view.dealer === oppSeat}
-          isTaker={view.taker === oppSeat}
-          declarations={oppDecls}
-          position="top"
-          reaction={reactions[oppSeat] ?? null}
-          turnDeadlineAt={view.turnDeadlineAt}
-        />
-      </div>
-
-      {/* Row 3: felt — the only flexible row, and the anchor origin for every
-        * card position below (see stageLayout.ts doc comment). */}
+      {/* Felt — seats for opponent only; your seat sits under the hand. */}
       <div className="relative z-10 min-h-0 overflow-hidden">
+        <div className="pointer-events-none absolute inset-x-0 top-1 z-30 flex justify-center">
+          <div className="pointer-events-auto">
+            <SeatPod
+              compact
+              key={`opp-${opp?.name ?? "opp"}`}
+              name={opp?.name ?? "Соперник"}
+              active={view.turn === oppSeat}
+              tricks={view.tricksTaken[oppSeat]}
+              isDealer={view.dealer === oppSeat}
+              isTaker={view.taker === oppSeat}
+              declarations={oppDecls}
+              position="top"
+              reaction={reactions[oppSeat] ?? null}
+              turnDeadlineAt={view.turnDeadlineAt}
+            />
+          </div>
+        </div>
+
         {/* `inset-y-2` rather than `top-2` on purpose: with an auto height the
           * panels' `max-h` percentage had nothing to resolve against, so the
           * stack overflowed the felt row, made it scrollable despite
@@ -495,7 +536,7 @@ export function MatchScreen({
             leftHanded ? "right-3" : "left-3",
           )}
         >
-          <div className="pointer-events-auto max-h-full overflow-y-auto">
+          <div className="pointer-events-auto h-full min-h-0 overflow-y-auto overscroll-contain">
             <HandLogPanel players={players} you={view.you} />
           </div>
         </aside>
@@ -505,19 +546,22 @@ export function MatchScreen({
             leftHanded ? "left-3" : "right-3",
           )}
         >
-          <div className="pointer-events-auto flex max-h-full flex-col gap-2 overflow-y-auto">
+          <div className="pointer-events-auto flex h-full min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain">
             <ScorePanel view={view} players={players} />
             {hintsOn && <HintsPanel view={view} />}
             <EmotePanel onSend={sendEmote} />
           </div>
         </aside>
 
-        {stageRows.compact && bidBar && (
-          <div className="absolute bottom-1 left-1/2 z-40 -translate-x-1/2">{bidBar}</div>
-        )}
-
-        <div className="absolute inset-0 mx-auto max-w-[1800px]">
-          <TableSurface trumpSuit={view.trump} reflection={showReflection} />
+        <div className="absolute inset-0 z-0 mx-auto max-w-[1800px]">
+          {/* Scene plates already paint the table — don't stack another one. */}
+          {roomStyle !== "scene" && (
+            <TableSurface
+              theme={theme}
+              trumpSuit={view.trump}
+              reflection={showReflection}
+            />
+          )}
 
           {view.phase === "playing" && (
             <>
@@ -540,7 +584,7 @@ export function MatchScreen({
             {Array.from({ length: display.oppShown }).map((_, i) => (
               <motion.div
                 key={`opp-${display.dealEpoch}-${i}`}
-                initial={{ y: -52, x: (i - 4) * 10, opacity: 0, scale: 0.8, rotate: (i - 4) * 5 }}
+                initial={{ y: -12, opacity: 0, scale: 0.92 }}
                 animate={{ y: 0, x: 0, opacity: 1, scale: 1, rotate: 0 }}
                 transition={{ type: "spring", stiffness: 320, damping: 22 }}
                 style={{ marginLeft: i === 0 ? 0 : -42, zIndex: i }}
@@ -624,103 +668,120 @@ export function MatchScreen({
         </div>
       </div>
 
-      {/* Row 4: dock — bidding bar + your seat pod. Auto height, so it never
-        * steals space from the felt except while actually shown. On compact
-        * stages the bar moves inside the felt row (above), leaving only the
-        * pod here. */}
-      <div className="relative z-30 flex flex-col items-center gap-1.5 px-3">
-        {!stageRows.compact && bidBar}
-
-        <SeatPod
-          key={`you-${display.seatEpoch}`}
-          name={you?.name ?? "Вы"}
-          you
-          active={myTurn}
-          tricks={view.tricksTaken[view.you]}
-          isDealer={view.dealer === view.you}
-          isTaker={view.taker === view.you}
-          declarations={yourDecls}
-          position="bottom"
-          compact
-          reaction={reactions[view.you] ?? null}
-          turnDeadlineAt={view.turnDeadlineAt}
-        />
+      {/* Settings — bottom-right, panel opens upward */}
+      <div className="pointer-events-none absolute bottom-[max(0.75rem,env(safe-area-inset-bottom))] right-3 z-40 min-[1100px]:right-[240px]">
+        <div className="pointer-events-auto">
+          <SettingsPopover
+            theme={theme}
+            onTheme={setTheme}
+            soundOn={soundOn}
+            onSoundOn={setSoundOn}
+            soundVolume={soundVolume}
+            onSoundVolume={setSoundVolume}
+            hintsOn={hintsOn}
+            onHintsOn={setHintsOn}
+            roomQuality={roomQualitySetting}
+            onRoomQuality={setRoomQuality}
+            roomStyle={roomStyle}
+            onRoomStyle={setRoomStyle}
+          />
+        </div>
       </div>
 
-      {/* Row 5: hand fan — fixed height, never grows/shrinks the felt. */}
-      <div className="relative z-30 flex w-full items-end justify-center overflow-visible px-3 pb-[max(0.35rem,env(safe-area-inset-bottom))]">
-        {view.hand.map((card, i) => {
-          const n = view.hand.length;
-          const mid = (n - 1) / 2;
-          const rot = (i - mid) * 4.2;
-          const lift = Math.abs(i - mid) * -2;
-          const faceDown = display.faceDownIds.includes(card.id);
-          const highlight = display.highlightIds.includes(card.id);
-          const selected = selectedCardIdx === i;
-          const canPlay
-            = myTurn
-              && view.phase === "playing"
-              && !display.animBusy
-              && legalIds.has(card.id);
-          const dimIllegal
-            = view.phase === "playing"
-              && myTurn
-              && !legalIds.has(card.id);
-          return (
-            <motion.div
-              key={`${display.dealEpoch}-${card.id}`}
-              initial={{
-                y: 120,
-                x: (mid - i) * 46,
-                opacity: 0,
-                rotate: (mid - i) * 10,
-                rotateY: 90,
-                scale: 0.72,
-              }}
-              animate={{
-                y: (canPlay ? -10 : 0) + lift + (selected ? -16 : 0),
-                x: 0,
-                opacity: dimIllegal ? 0.32 : 1,
-                rotate: rot,
-                rotateY: faceDown ? 90 : 0,
-                scale: selected ? 1.05 : 1,
-              }}
-              transition={{
-                delay: faceDown ? 0 : Math.min(i, 8) * 0.03,
-                type: "spring",
-                stiffness: 260,
-                damping: 22,
-              }}
-              style={{
-                marginLeft: i === 0
-                  ? 0
-                  : `calc(-1 * clamp(${n > 7 ? "22px, 3.4vw, 40px" : "18px, 2.8vw, 34px"}))`,
-                zIndex: selected ? 50 : i,
-                transformOrigin: "bottom center",
-              }}
-              className="origin-bottom"
-            >
-              <PlayingCard
-                card={card}
-                faceDown={faceDown}
-                size={handCardSize}
-                layoutId={`card-${card.id}`}
-                disabled={!canPlay}
-                onClick={canPlay
-                  ? () => {
-                      if (isCoarsePointer && selectedCardIdx !== i) {
-                        setSelectedCardIdx(i);
-                        return;
+      {/* Hand dock — cards overlap the table rail; avatar under cards. */}
+      <div className="relative z-50 flex w-full flex-col items-center justify-end overflow-visible px-3 pb-[max(0.25rem,env(safe-area-inset-bottom))]">
+        {bidBar && (
+          <div className="pointer-events-none absolute bottom-full left-0 right-0 z-[60] mb-1 flex justify-center">
+            <div className="pointer-events-auto">{bidBar}</div>
+          </div>
+        )}
+        <div className="relative z-50 -mt-8 flex w-full items-end justify-center">
+          {view.hand.map((card, i) => {
+            const n = view.hand.length;
+            const mid = (n - 1) / 2;
+            const rot = (i - mid) * 4.2;
+            const lift = Math.abs(i - mid) * -2;
+            const faceDown = display.faceDownIds.includes(card.id);
+            const highlight = display.highlightIds.includes(card.id);
+            const selected = selectedCardIdx === i;
+            const canPlay
+              = myTurn
+                && view.phase === "playing"
+                && !display.animBusy
+                && legalIds.has(card.id);
+            const dimIllegal
+              = view.phase === "playing"
+                && myTurn
+                && !legalIds.has(card.id);
+            return (
+              <motion.div
+                key={`${display.dealEpoch}-${card.id}`}
+                initial={{
+                  y: 28,
+                  opacity: 0,
+                  rotate: rot * 0.4,
+                  scale: 0.92,
+                }}
+                animate={{
+                  y: (canPlay ? -10 : 0) + lift + (selected ? -16 : 0),
+                  opacity: dimIllegal ? 0.32 : 1,
+                  rotate: rot,
+                  scale: selected ? 1.05 : 1,
+                }}
+                transition={{
+                  delay: faceDown ? 0 : Math.min(i, 8) * 0.025,
+                  type: "spring",
+                  stiffness: 320,
+                  damping: 26,
+                }}
+                style={{
+                  marginLeft: i === 0
+                    ? 0
+                    : `calc(-1 * clamp(${n > 7 ? "22px, 3.4vw, 40px" : "18px, 2.8vw, 34px"}))`,
+                  zIndex: selected ? 50 : i,
+                  transformOrigin: "bottom center",
+                }}
+                className="origin-bottom"
+              >
+                <PlayingCard
+                  card={card}
+                  faceDown={faceDown}
+                  size={handCardSize}
+                  layoutId={display.animBusy ? undefined : `card-${card.id}`}
+                  disabled={!canPlay}
+                  onClick={canPlay
+                    ? () => {
+                        if (isCoarsePointer && selectedCardIdx !== i) {
+                          setSelectedCardIdx(i);
+                          return;
+                        }
+                        play(card.id);
+                        setSelectedCardIdx(null);
                       }
-                      play(card.id);
-                      setSelectedCardIdx(null);
-                    }
-                  : undefined}
-                glow={canPlay ? "legal" : highlight ? "gold" : selected ? "gold" : false}
-              />
-            </motion.div>
-          );
-        })}
+                    : undefined}
+                  glow={canPlay ? "legal" : highlight ? "gold" : selected ? "gold" : false}
+                />
+              </motion.div>
+            );
+          })}
+        </div>
+
+        <div className="relative z-40 mt-0.5 shrink-0">
+          <SeatPod
+            key={`you-${you?.name ?? "you"}`}
+            name={you?.name ?? "Вы"}
+            you
+            active={myTurn}
+            tricks={view.tricksTaken[view.you]}
+            isDealer={view.dealer === view.you}
+            isTaker={view.taker === view.you}
+            declarations={yourDecls}
+            position="bottom"
+            compact
+            reaction={reactions[view.you] ?? null}
+            turnDeadlineAt={view.turnDeadlineAt}
+          />
+        </div>
       </div>
 
       {/* Hand-end / match-over — fixed modal overlay, independent of the grid
@@ -798,7 +859,7 @@ function SettingsPopover({
   onRoomStyle,
 }: {
   theme: string;
-  onTheme: (t: (typeof TABLE_THEMES)[number]["id"]) => void;
+  onTheme: (t: TableThemeId) => void;
   soundOn: boolean;
   onSoundOn: (v: boolean) => void;
   soundVolume: number;
@@ -812,6 +873,8 @@ function SettingsPopover({
 }) {
   return (
     <Popover
+      side="top"
+      align="end"
       trigger={({ open, toggle }) => (
         <IconButton label="Настройки" active={open} onClick={toggle}>
           <Settings size={16} />
@@ -826,7 +889,7 @@ function SettingsPopover({
             theme={theme}
             activeStyle={roomStyle}
             rowStyle="room3d"
-            onPick={onTheme}
+            onPick={id => onTheme(id as TableThemeId)}
             onStyle={onRoomStyle}
           />
           <div className="mb-1.5 mt-2.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--muted)]">
@@ -837,7 +900,18 @@ function SettingsPopover({
             theme={theme}
             activeStyle={roomStyle}
             rowStyle="legacy"
-            onPick={onTheme}
+            onPick={id => onTheme(id as TableThemeId)}
+            onStyle={onRoomStyle}
+          />
+          <div className="mb-1.5 mt-2.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--muted)]">
+            Сцена 1:1
+          </div>
+          <ThemeRow
+            themes={SCENE_THEMES}
+            theme={theme}
+            activeStyle={roomStyle}
+            rowStyle="scene"
+            onPick={id => onTheme(id as TableThemeId)}
             onStyle={onRoomStyle}
           />
         </div>

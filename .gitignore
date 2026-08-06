@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Local auth user DB
+server/data/
+.env
+server/.env
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

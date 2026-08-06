@@ -1,0 +1,40 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: belote
+      POSTGRES_PASSWORD: belote
+      POSTGRES_DB: belote
+    ports:
+      - "5433:5432"
+    volumes:
+      - belote_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U belote -d belote"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      DATABASE_URL: postgresql://belote:belote@postgres:5432/belote?schema=public
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-in-production}
+      JWT_ACCESS_TTL: 15m
+      JWT_REFRESH_TTL: 30d
+      NODE_ENV: production
+      CORS_ORIGINS: http://localhost:5173
+      HOUSE_EMAIL: house@belot.local
+      PORT: 3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  belote_pg:

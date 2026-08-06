@@ -4,6 +4,7 @@ import { Injectable } from "@nestjs/common";
 export interface Session {
   id: string;
   name: string;
+  userId?: string;
 }
 
 const MAX_NAME = 24;
@@ -27,10 +28,11 @@ export function sanitizeName(name?: string): string | undefined {
 export class SessionService {
   private sessions = new Map<string, Session>();
 
-  create(name?: string): Session {
+  create(name?: string, userId?: string): Session {
     const session: Session = {
-      id: randomUUID(),
+      id: userId ? `user-${userId}` : randomUUID(),
       name: sanitizeName(name) || `Игрок-${Math.floor(Math.random() * 9000 + 1000)}`,
+      userId,
     };
     this.sessions.set(session.id, session);
     return session;
@@ -49,6 +51,17 @@ export class SessionService {
       return existing;
     }
     return this.create(name);
+  }
+
+  /** Stable play session for a logged-in account. */
+  ensureAuth(userId: string, name?: string): Session {
+    const id = `user-${userId}`;
+    if (this.sessions.has(id)) {
+      const existing = this.sessions.get(id)!;
+      existing.userId = userId;
+      return existing;
+    }
+    return this.create(name, userId);
   }
 
   setName(id: string, name: string): Session | undefined {

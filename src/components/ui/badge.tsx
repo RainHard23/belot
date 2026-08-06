@@ -22,21 +22,21 @@ export function Badge({
 }
 
 export function BalancePill({
-  amount = "$7.50",
+  amount = 0,
   className,
 }: {
-  amount?: string;
+  amount?: number;
   className?: string;
 }) {
   return (
     <div
       className={cn(
-        "flex h-[42px] min-w-[152px] items-center justify-center gap-2 rounded-[14px] border-[1.6px] border-[#25252b] bg-[#1d1d22] text-[14px] text-white",
+        "flex h-[42px] min-w-[112px] items-center justify-center gap-2 rounded-[14px] border border-[#fb9e1d]/25 bg-[#1d1d22] px-3 text-[14px] font-semibold text-white shadow-[inset_0_0_0_1px_rgba(251,158,29,0.06)]",
         className,
       )}
     >
-      <img src={ASSETS.chipGold} alt="" className="size-5" />
-      {amount}
+      <img src={ASSETS.chipGold} alt="" className="size-5 drop-shadow-[0_0_8px_rgba(251,158,29,0.35)]" />
+      <span className="tabular-nums tracking-tight">{amount.toLocaleString("ru-RU")}</span>
     </div>
   );
 }

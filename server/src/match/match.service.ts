@@ -11,14 +11,19 @@ import {
   playCard,
   startHand,
 } from "../../../shared/game";
+import { isBotSession } from "../lobby/lobby.service";
 
 export interface ServerMatch {
   id: string;
   tableId: string;
-  seats: { sessionId: string; name: string; seat: Seat }[];
+  seats: { sessionId: string; name: string; seat: Seat; userId?: string }[];
   state: MatchState;
   prevState: MatchState | null;
   target: number;
+  buyIn: number;
+  pot: number;
+  practice: boolean;
+  settled: boolean;
 }
 
 function cloneState(state: MatchState): MatchState {
@@ -31,25 +36,29 @@ export const DEFAULT_MATCH_TARGET = 501;
 export class MatchService {
   private matches = new Map<string, ServerMatch>();
   private bySession = new Map<string, string>();
-  /**
-   * Wired up in providers.ts to `TurnTimerService.deadlineFor` after both
-   * singletons exist — avoids a circular constructor dependency (the timer
-   * service needs `MatchService` to act on timeout) while still letting
-   * `broadcast` attach the live deadline to every `match:state` payload.
-   */
   private deadlineProvider: ((matchId: string) => number | null) | null = null;
+  private settleHook: ((match: ServerMatch) => void | Promise<void>) | null = null;
 
   setDeadlineProvider(fn: (matchId: string) => number | null) {
     this.deadlineProvider = fn;
   }
 
-  createFromTable(table: LobbyTable, target = DEFAULT_MATCH_TARGET): ServerMatch {
+  setSettleHook(fn: (match: ServerMatch) => void | Promise<void>) {
+    this.settleHook = fn;
+  }
+
+  createFromTable(
+    table: LobbyTable,
+    opts?: { practice?: boolean; target?: number },
+  ): ServerMatch {
+    const practice = opts?.practice === true;
     const seats = table.seats
       .map((s, i) =>
         s
           ? {
               sessionId: s.sessionId,
               name: s.name,
+              userId: s.userId,
               seat: (i === 0 ? "p0" : "p1") as Seat,
             }
           : null,
@@ -60,13 +69,21 @@ export class MatchService {
     const prevState = cloneState(state);
     state = startHand(state);
 
+    const buyIn = practice ? 0 : table.buyIn;
+    const humanSeats = seats.filter(s => !isBotSession(s.sessionId));
+    const pot = practice ? 0 : buyIn * humanSeats.length;
+
     const match: ServerMatch = {
       id: randomUUID(),
       tableId: table.id,
       seats,
       state,
       prevState,
-      target,
+      target: opts?.target ?? table.target ?? DEFAULT_MATCH_TARGET,
+      buyIn,
+      pot,
+      practice,
+      settled: practice || pot === 0,
     };
     this.matches.set(match.id, match);
     for (const s of seats) this.bySession.set(s.sessionId, match.id);
@@ -94,7 +111,6 @@ export class MatchService {
     this.matches.delete(matchId);
   }
 
-  /** Broadcast view + anim; pass `{ snap: true }` on join/reconnect. */
   broadcast(matchId: string, server: Server, opts?: { snap?: boolean }) {
     const match = this.matches.get(matchId);
     if (!match)
@@ -103,6 +119,9 @@ export class MatchService {
     const snap = opts?.snap === true;
     const winner = this.matchWinner(match);
     const turnDeadlineAt = this.deadlineProvider?.(matchId) ?? null;
+
+    if (winner && !match.settled && this.settleHook)
+      void Promise.resolve(this.settleHook(match)).catch(err => console.error("settleHook", err));
 
     for (const s of match.seats) {
       const view = perspective(match.state, s.seat);
@@ -119,6 +138,9 @@ export class MatchService {
         view: {
           ...view,
           target: match.target,
+          buyIn: match.buyIn,
+          pot: match.pot,
+          practice: match.practice,
           matchOver: winner
             ? { winner: winner.seat, reason: winner.reason }
             : null,
@@ -173,7 +195,7 @@ export class MatchService {
     if ("error" in result)
       return result;
     match.state = result;
-    return { ok: true as const };
+    return { ok: true as const, justFinished: Boolean(this.matchWinner(match)) };
   }
 
   doPlay(matchId: string, sessionId: string, cardId: string) {
@@ -189,7 +211,7 @@ export class MatchService {
     if ("error" in result)
       return result;
     match.state = result;
-    return { ok: true as const };
+    return { ok: true as const, justFinished: Boolean(this.matchWinner(match)) };
   }
 
   nextHand(matchId: string, sessionId: string) {

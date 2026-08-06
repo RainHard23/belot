@@ -11,8 +11,14 @@ const buttonVariants = cva(
       variant: {
         default:
           "border-2 border-white/15 text-white shadow-[0_0_17px_rgba(255,179,32,0.27)]",
+        /** Figma Play — crimson → orange; selected row uses gold via `playSelected`. */
         play:
-          "bg-gradient-to-b from-[#ff5a4e] to-[#c62828] text-white shadow-[0_4px_12px_rgba(229,57,53,0.35)]",
+          "bg-[linear-gradient(180deg,#d6471a_0%,#9a2c39_100%)] text-white shadow-[0_4px_12px_rgba(154,44,57,0.35)]",
+        playSelected:
+          "border-2 border-white/15 text-white shadow-[0_0_17px_rgba(255,179,32,0.27)]",
+        /** Figma Watch — flat dark chip. */
+        watch:
+          "bg-[#1d1d22] text-[#74747c] hover:bg-[#25252b] hover:text-[#cfcfd4]",
         secondary:
           "border border-[#25252b] bg-[#1d1d22] text-[#f3f3f3] hover:bg-[#25252b]",
         ghost: "text-[#f3f3f3] hover:bg-white/5",
@@ -24,6 +30,8 @@ const buttonVariants = cva(
       size: {
         default: "h-10 rounded-[14px] px-4 text-sm",
         sm: "h-8 rounded-[10px] px-3 text-[13px]",
+        /** Figma table-row CTA — 42×120-ish. */
+        row: "h-[42px] min-w-[110px] rounded-[14px] px-5 text-[15px]",
         lg: "h-12 rounded-[14px] px-6 text-base",
         icon: "size-[42px] rounded-[14px]",
       },
@@ -47,8 +55,8 @@ export function Button({
   ...props
 }: ButtonProps) {
   const Comp = asChild ? Slot : "button";
-  const depositStyle
-    = variant === "default" || variant === undefined
+  const goldFill
+    = variant === "default" || variant === undefined || variant === "playSelected"
       ? {
           background:
             "radial-gradient(circle at 90% 100%, #f38300 0%, #fea929 66%, #fab854 100%)",
@@ -58,7 +66,11 @@ export function Button({
   return (
     <Comp
       className={cn(buttonVariants({ variant, size, className }))}
-      style={variant === "default" || !variant ? depositStyle : style}
+      style={
+        variant === "default" || !variant || variant === "playSelected"
+          ? goldFill
+          : style
+      }
       {...props}
     />
   );

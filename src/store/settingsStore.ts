@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type TableThemeId = "neon" | "sapphire" | "emerald" | "burgundy";
+export type TableThemeId = "neon" | "sapphire" | "emerald" | "burgundy" | "tavern";
 
 /**
  * How much of the 3D room to draw. `low` drops every `filter: blur()` layer
@@ -10,11 +10,12 @@ export type TableThemeId = "neon" | "sapphire" | "emerald" | "burgundy";
 export type RoomQuality = "auto" | "high" | "medium" | "low";
 
 /**
- * Which environment to draw behind the table. `legacy` is the pre-rebuild
- * flat photo backdrop, kept selectable purely so the two can be compared
- * side by side.
+ * Which environment to draw behind the table.
+ * - `room3d` — lit 3D room + procedural CSS table
+ * - `legacy` — flat photo backdrop (comparison)
+ * - `scene` — full painted plate (table in the art); CSS table hidden
  */
-export type RoomStyle = "room3d" | "legacy";
+export type RoomStyle = "room3d" | "legacy" | "scene";
 
 const LEGACY_THEME_KEY = "bilot_table_theme";
 const STORAGE_KEY = "bilot_settings_v1";

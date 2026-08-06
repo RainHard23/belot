@@ -17,6 +17,7 @@ const LEGACY_TINTS: Record<TableThemeId, { c1: string; c2: string; c3: string; r
   neon: { c1: "#1a3a80", c2: "#0a1535", c3: "#020610", rays: "#35e6ff", raysOpacity: 0.12 },
   sapphire: { c1: "#1a3550", c2: "#101c30", c3: "#060a14", rays: "#8fc4ff", raysOpacity: 0.06 },
   burgundy: { c1: "#3a1c20", c2: "#1c0e10", c3: "#0a0505", rays: "#ff9d6e", raysOpacity: 0.05 },
+  tavern: { c1: "#3a2a18", c2: "#1a120a", c3: "#080603", rays: "#ffc070", raysOpacity: 0.06 },
 };
 
 export function LegacyBackdrop({ theme }: { theme: TableThemeId }) {

@@ -1,24 +1,33 @@
 import { MotionConfig } from "motion/react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useAuthStore } from "./store/authStore";
 import { useLobbyStore } from "./store/lobbyStore";
 import { useMatchStore } from "./store/matchStore";
+import { AuthGate } from "./ui/AuthGate";
 import { LobbyScreen } from "./ui/lobby/LobbyScreen";
 import { MatchScreen } from "./ui/match/MatchScreen";
 import { NameGate } from "./ui/NameGate";
 
-function hasName() {
-  return Boolean(sessionStorage.getItem("bilot_name")?.trim());
-}
-
 export default function App() {
-  const [named, setNamed] = useState(hasName);
+  const token = useAuthStore(s => s.token);
+  const user = useAuthStore(s => s.user);
+  const ready = useAuthStore(s => s.ready);
+  const hydrate = useAuthStore(s => s.hydrate);
+  const logout = useAuthStore(s => s.logout);
+
+  const [editingName, setEditingName] = useState(false);
   const [screen, setScreen] = useState<"lobby" | "match">("lobby");
   const [matchId, setMatchId] = useState<string | null>(null);
+
   const leaveLobbyTable = useLobbyStore(s => s.leave);
   const seatedTableId = useLobbyStore(s => s.seatedTableId);
   const setName = useLobbyStore(s => s.setName);
   const clearMatchNav = useLobbyStore(s => s.clearMatchNav);
   const clearMatch = useMatchStore(s => s.clear);
+
+  useEffect(() => {
+    void hydrate();
+  }, [hydrate]);
 
   const onEnterMatch = useCallback((id: string) => {
     setMatchId(id);
@@ -37,15 +46,37 @@ export default function App() {
   const onName = (name: string) => {
     sessionStorage.setItem("bilot_name", name);
     setName(name);
-    setNamed(true);
+    setEditingName(false);
   };
+
+  const onLogout = () => {
+    if (seatedTableId)
+      leaveLobbyTable(seatedTableId);
+    clearMatch();
+    clearMatchNav();
+    setMatchId(null);
+    setScreen("lobby");
+    setEditingName(false);
+    void logout();
+  };
+
+  if (!ready) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#19191d] text-[#74747c]">
+        …
+      </div>
+    );
+  }
+
+  if (!token || !user)
+    return <AuthGate />;
 
   return (
     <MotionConfig reducedMotion="user">
-      {!named
+      {editingName
         ? (
             <NameGate
-              initial={sessionStorage.getItem("bilot_name") ?? ""}
+              initial={user.displayName}
               onDone={onName}
             />
           )
@@ -54,7 +85,8 @@ export default function App() {
           : (
               <LobbyScreen
                 onEnterMatch={onEnterMatch}
-                onEditName={() => setNamed(false)}
+                onEditName={() => setEditingName(true)}
+                onLogout={onLogout}
               />
             )}
     </MotionConfig>

@@ -5,11 +5,13 @@ import type {
 import type { Server, Socket } from "socket.io";
 import type { BidAction } from "../../shared/game";
 import type { EmotePayload } from "../../shared/net/protocol";
+import type { AuthService } from "./auth/auth.service";
 import type { LobbyService } from "./lobby/lobby.service";
 import type { BotService } from "./match/bot.service";
-import type { MatchService } from "./match/match.service";
+import type { MatchService, ServerMatch } from "./match/match.service";
 import type { TurnTimerService } from "./match/turn-timer.service";
 import type { SessionService } from "./session/session.service";
+import type { WalletService } from "./wallet/wallet.service";
 import { Inject } from "@nestjs/common";
 import {
   ConnectedSocket,
@@ -20,10 +22,9 @@ import {
 } from "@nestjs/websockets";
 import { isEmoteKind } from "../../shared/net/protocol";
 import { isBotSession } from "./lobby/lobby.service";
-import { BOT, LOBBY, MATCH, SESSION, TURN_TIMER } from "./providers";
+import { AUTH, BOT, LOBBY, MATCH, SESSION, TURN_TIMER, WALLET } from "./providers";
 import { SlidingWindowLimiter } from "./rate-limiter";
 
-/** Per-session emote rate limit: at most 5 emotes per rolling 10s window. */
 const EMOTE_WINDOW_MS = 10_000;
 const EMOTE_MAX_PER_WINDOW = 5;
 
@@ -38,11 +39,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server!: Server;
 
-  /** Pending teardown after last socket for a session drops */
   private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private emoteLimiter = new SlidingWindowLimiter(EMOTE_MAX_PER_WINDOW, EMOTE_WINDOW_MS);
 
   constructor(
+    @Inject(AUTH) private readonly auth: AuthService,
+    @Inject(WALLET) private readonly wallet: WalletService,
     @Inject(SESSION) private readonly sessions: SessionService,
     @Inject(LOBBY) private readonly lobby: LobbyService,
     @Inject(MATCH) private readonly matches: MatchService,
@@ -52,11 +54,26 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   handleConnection(client: Socket) {
     try {
-      const session = this.sessions.ensure(
-        client.handshake.auth?.sessionId as string | undefined,
-        client.handshake.auth?.name as string | undefined,
-      );
+      const token = client.handshake.auth?.token as string | undefined;
+      if (!token) {
+        client.emit("auth:error", { message: "Нужна авторизация" });
+        client.disconnect(true);
+        return;
+      }
+
+      let session;
+      try {
+        const payload = this.auth.verifyToken(token);
+        session = this.sessions.ensureAuth(payload.sub, payload.name);
+      }
+      catch {
+        client.emit("auth:error", { message: "Сессия истекла — войдите снова" });
+        client.disconnect(true);
+        return;
+      }
+
       client.data.sessionId = session.id;
+      client.data.userId = session.userId;
       client.join(`session:${session.id}`);
 
       const pending = this.disconnectTimers.get(session.id);
@@ -112,26 +129,29 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const room = this.server.sockets.adapter.rooms.get(`session:${sessionId}`);
       if (room && room.size > 0)
         return;
-      this.teardownSession(sessionId);
+      void this.teardownSession(sessionId);
     }, 8_000);
     this.disconnectTimers.set(sessionId, timer);
   }
 
-  private teardownSession(sessionId: string) {
+  private async teardownSession(sessionId: string) {
     const match = this.matches.getBySession(sessionId);
     if (match) {
       this.bot.cancel(match.id);
       this.turnTimer.cancel(match.id);
+      await this.handleForfeit(match, sessionId);
       this.matches.notifyOpponentLeft(match.id, sessionId, this.server);
       this.lobby.setMatch(match.tableId, null);
     }
     const touched = this.lobby.leaveAll(sessionId);
-    for (const tableId of touched) this.vacateBotIfAlone(tableId);
+    for (const tableId of touched) {
+      await this.refundIfPaidNoMatch(tableId, sessionId);
+      this.vacateBotIfAlone(tableId);
+    }
     this.emoteLimiter.reset(sessionId);
     this.server.emit("lobby:tables", this.lobby.list());
   }
 
-  /** A practice bot can't sit at a table by itself once the human leaves. */
   private vacateBotIfAlone(tableId: string) {
     const table = this.lobby.get(tableId);
     if (!table)
@@ -162,7 +182,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage("lobby:sit")
-  sit(
+  async sit(
     @ConnectedSocket() client: Socket,
     @MessageBody() body: { tableId?: string },
   ) {
@@ -173,24 +193,48 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!body?.tableId || typeof body.tableId !== "string")
       return { error: "invalid_payload" };
 
-    const result = this.lobby.sit(body.tableId, sessionId, session.name);
-    if ("error" in result)
-      return result;
+    const table = this.lobby.get(body.tableId);
+    if (!table)
+      return { error: "table_not_found" };
+
+    const preview = this.lobby.sit(body.tableId, sessionId, session.name, session.userId);
+    if ("error" in preview)
+      return preview;
+
+    // Charge buy-in only on first seat at this table
+    if (preview.newlySeated && table.buyIn > 0 && session.userId) {
+      try {
+        await this.wallet.debit({
+          userId: session.userId,
+          amount: table.buyIn,
+          type: "buyin",
+          idempotencyKey: `buyin:${body.tableId}:${sessionId}`,
+          refType: "table",
+          refId: body.tableId,
+        });
+        this.lobby.markPaid(body.tableId, sessionId);
+      }
+      catch {
+        this.lobby.leave(body.tableId, sessionId);
+        return { error: "insufficient_funds" };
+      }
+    }
 
     client.join(`table:${body.tableId}`);
     this.server.emit("lobby:tables", this.lobby.list());
 
-    const filled = result.table.seats.filter(Boolean).length;
-    if (filled === 2 && !result.table.matchId) {
-      const target = Number.parseInt(result.table.stakes.replace(/\D/g, ""), 10) || 501;
-      const match = this.matches.createFromTable(result.table, target);
+    const filled = preview.table.seats.filter(Boolean).length;
+    if (filled === 2 && !preview.table.matchId) {
+      const match = this.matches.createFromTable(preview.table, {
+        practice: false,
+        target: preview.table.target,
+      });
       this.lobby.setMatch(body.tableId, match.id);
       const payload = { matchId: match.id, tableId: body.tableId };
       this.server.to(`table:${body.tableId}`).emit("match:start", payload);
-      for (const seat of result.table.seats) {
-        if (seat) {
+      for (const seat of preview.table.seats) {
+        if (seat)
           this.server.to(`session:${seat.sessionId}`).emit("match:start", payload);
-        }
       }
       this.turnTimer.schedule(match.id, this.server);
       this.matches.broadcast(match.id, this.server);
@@ -199,12 +243,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     return {
       ok: true,
-      seatIndex: result.seatIndex,
+      seatIndex: preview.seatIndex,
       table: this.lobby.list().find(t => t.id === body.tableId),
     };
   }
 
-  /** Solo practice: sit alone, a bot fills the other seat and the match starts immediately. */
+  /** Solo practice — no buy-in. */
   @SubscribeMessage("lobby:practice")
   practice(@ConnectedSocket() client: Socket) {
     const sessionId = client.data.sessionId as string;
@@ -216,7 +260,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!openTable)
       return { error: "table_full" };
 
-    const sitResult = this.lobby.sit(openTable.id, sessionId, session.name);
+    const sitResult = this.lobby.sit(openTable.id, sessionId, session.name, session.userId);
     if ("error" in sitResult)
       return sitResult;
     const botResult = this.lobby.sitBot(openTable.id);
@@ -226,8 +270,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.join(`table:${openTable.id}`);
     this.server.emit("lobby:tables", this.lobby.list());
 
-    const target = Number.parseInt(botResult.table.stakes.replace(/\D/g, ""), 10) || 501;
-    const match = this.matches.createFromTable(botResult.table, target);
+    const match = this.matches.createFromTable(botResult.table, {
+      practice: true,
+      target: botResult.table.target,
+    });
     this.lobby.setMatch(openTable.id, match.id);
 
     const payload = { matchId: match.id, tableId: openTable.id };
@@ -240,7 +286,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage("lobby:leave")
-  leave(
+  async leave(
     @ConnectedSocket() client: Socket,
     @MessageBody() body: { tableId?: string },
   ) {
@@ -251,10 +297,16 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const table = this.lobby.get(body.tableId);
     const matchId = table?.matchId;
     if (matchId) {
+      const match = this.matches.get(matchId);
       this.bot.cancel(matchId);
       this.turnTimer.cancel(matchId);
+      if (match)
+        await this.handleForfeit(match, sessionId);
       this.matches.notifyOpponentLeft(matchId, sessionId, this.server);
       this.lobby.setMatch(body.tableId, null);
+    }
+    else {
+      await this.refundIfPaidNoMatch(body.tableId, sessionId);
     }
 
     this.lobby.leave(body.tableId, sessionId);
@@ -336,11 +388,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return { ok: true };
   }
 
-  /**
-   * Table emote — orthogonal to game state (no `prevState`/anim diffing),
-   * so it bypasses `MatchService.broadcast` entirely and goes straight to
-   * the `match:` room both seats already joined on join/resume.
-   */
   @SubscribeMessage("match:emote")
   emote(
     @ConnectedSocket() client: Socket,
@@ -362,5 +409,74 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const payload: EmotePayload = { matchId: body.matchId, seat, kind: body.kind, ts: Date.now() };
     this.server.to(`match:${body.matchId}`).emit("match:emote", payload);
     return { ok: true };
+  }
+
+  /** Mid-match leave: remaining human wins pot (90/10). */
+  private async handleForfeit(match: ServerMatch, leaverSessionId: string) {
+    if (match.settled || match.practice || match.pot <= 0) {
+      match.settled = true;
+      return;
+    }
+    const winner = match.seats.find(
+      s => s.sessionId !== leaverSessionId && !isBotSession(s.sessionId),
+    );
+    if (!winner?.userId) {
+      for (const s of match.seats) {
+        if (s.userId && !isBotSession(s.sessionId) && match.buyIn > 0) {
+          try {
+            await this.wallet.credit({
+              userId: s.userId,
+              amount: match.buyIn,
+              type: "refund",
+              idempotencyKey: `refund:forfeit:${match.id}:${s.sessionId}`,
+              refType: "match",
+              refId: match.id,
+            });
+          }
+          catch (err) {
+            console.error("refund failed", err);
+          }
+        }
+      }
+      match.settled = true;
+      return;
+    }
+    match.settled = true;
+    try {
+      await this.wallet.settleMatch({
+        matchId: match.id,
+        pot: match.pot,
+        winnerUserId: winner.userId,
+      });
+    }
+    catch (err) {
+      console.error("forfeit settle failed", err);
+      match.settled = false;
+    }
+  }
+
+  private async refundIfPaidNoMatch(tableId: string, sessionId: string) {
+    const table = this.lobby.get(tableId);
+    if (!table || table.matchId)
+      return;
+    if (!this.lobby.wasPaid(tableId, sessionId))
+      return;
+    const session = this.sessions.get(sessionId);
+    if (!session?.userId || table.buyIn <= 0)
+      return;
+    try {
+      await this.wallet.credit({
+        userId: session.userId,
+        amount: table.buyIn,
+        type: "refund",
+        idempotencyKey: `refund:leave:${tableId}:${sessionId}`,
+        refType: "table",
+        refId: tableId,
+      });
+    }
+    catch (err) {
+      console.error("leave refund failed", err);
+    }
+    this.lobby.clearPaid(tableId, sessionId);
   }
 }

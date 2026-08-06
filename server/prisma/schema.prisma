@@ -1,0 +1,88 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum LedgerType {
+  deposit_mock
+  deposit_crypto
+  buyin
+  payout
+  rake
+  refund
+}
+
+enum DepositStatus {
+  pending
+  confirmed
+  expired
+  failed
+}
+
+model User {
+  id           String         @id @default(uuid())
+  email        String         @unique
+  passwordHash String
+  displayName  String
+  createdAt    DateTime       @default(now())
+  wallet       Wallet?
+  refreshTokens RefreshToken[]
+  ledger       LedgerEntry[]
+  deposits     DepositOrder[]
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([tokenHash])
+}
+
+model Wallet {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  balance   Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+model LedgerEntry {
+  id             String     @id @default(uuid())
+  userId         String
+  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount         Int
+  type           LedgerType
+  refType        String?
+  refId          String?
+  idempotencyKey String     @unique
+  createdAt      DateTime   @default(now())
+
+  @@index([userId, createdAt])
+}
+
+/// Stub for future crypto deposits — mock path credits wallet directly.
+model DepositOrder {
+  id             String        @id @default(uuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amountExpected Int
+  amountReceived Int?
+  currency       String        @default("USD")
+  provider       String        @default("mock")
+  status         DepositStatus @default(pending)
+  externalRef    String?
+  createdAt      DateTime      @default(now())
+  confirmedAt    DateTime?
+
+  @@index([userId, status])
+}

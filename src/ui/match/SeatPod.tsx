@@ -84,7 +84,7 @@ export function SeatPod({
 
   return (
     <motion.div
-      initial={{ scale: 0.75, opacity: 0, y: position === "top" ? -20 : 20 }}
+      initial={false}
       animate={{ scale: 1, opacity: 1, y: 0 }}
       transition={{ type: "spring", stiffness: 280, damping: 18 }}
       className={cn(

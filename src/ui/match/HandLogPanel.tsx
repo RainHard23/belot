@@ -21,7 +21,7 @@ export function HandLogPanel({
 }) {
   const [lines, setLines] = useState<LogLine[]>([]);
   const idRef = useRef(0);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     return subscribeAmbient((event: AmbientEvent) => {
@@ -37,13 +37,21 @@ export function HandLogPanel({
     });
   }, [players, you]);
 
+  // Keep scroll inside this panel only — never scrollIntoView (that walks up
+  // to the document and jerks the whole match stage downward on deal/bid).
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = scrollRef.current;
+    if (!el)
+      return;
+    el.scrollTop = el.scrollHeight;
   }, [lines]);
 
   return (
-    <Panel title={ru.logTitle} className="min-h-0">
-      <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1 text-[12px] leading-snug text-white/75">
+    <Panel title={ru.logTitle} className="flex min-h-0 max-h-full flex-col">
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain pr-1 text-[12px] leading-snug text-white/75"
+      >
         {lines.length === 0 && (
           <p className="text-white/35">{ru.logEmpty}</p>
         )}
@@ -52,7 +60,6 @@ export function HandLogPanel({
             {line.text}
           </p>
         ))}
-        <div ref={bottomRef} />
       </div>
     </Panel>
   );

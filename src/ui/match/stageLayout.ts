@@ -8,11 +8,9 @@ import * as React from "react";
  * so any change in HUD or hand-dock height shifted what "12%" meant and
  * pushed things around (and on short viewports, past the bottom edge).
  *
- * Fix: the match grid has five explicit rows (hud / seat / felt / dock /
- * hand). The felt row is the only flexible one (`minmax(0, 1fr)`) and is
- * `position: relative` — every card anchor below is a percentage of THAT
- * row's own box, never the viewport. HUD growing or the dock changing
- * height can no longer move the table.
+ * Fix: the match grid is hud / felt / hand. Seats and bid sit absolutely
+ * inside the felt so the table keeps the leftover height. Card anchors are
+ * percentages of the felt box, never the viewport.
  */
 
 /**
@@ -25,21 +23,21 @@ import * as React from "react";
  * table a 148px sliver.
  */
 export const STAGE_ROWS = {
-  mobile: { hud: 44, seat: 0, dock: 0, hand: 128, compact: true },
-  tablet: { hud: 52, seat: 0, dock: 0, hand: 152, compact: false },
-  desktop: { hud: 56, seat: 0, dock: 0, hand: 168, compact: false },
+  /** Hand row fits fan + your seat avatar under the cards. */
+  mobile: { hud: 44, seat: 0, dock: 0, hand: 168, compact: true },
+  tablet: { hud: 48, seat: 0, dock: 0, hand: 188, compact: false },
+  desktop: { hud: 52, seat: 0, dock: 0, hand: 200, compact: false },
   /** Short viewports: laptops at 800px tall, and anything with a small window. */
-  short: { hud: 48, seat: 0, dock: 0, hand: 136, compact: true },
+  short: { hud: 44, seat: 0, dock: 0, hand: 172, compact: true },
 } as const;
 
 /**
- * `grid-template-rows` for the stage: hud | seatRow(auto) | felt(1fr) |
- * dock(auto) | hand(fixed). Seat/dock rows are `auto` — their content
- * (opponent pod, bidding bar) sizes them, they just don't fight for the
- * remaining space the felt gets.
+ * `grid-template-rows` for the stage: hud | felt(1fr) | hand.
+ * Seat pods and the bid bar live *inside* the felt (absolute), so the table
+ * gets the full leftover height instead of being squeezed by auto rows.
  */
 export function gridTemplateRows(hudPx: number, handPx: number) {
-  return `${hudPx}px auto minmax(0, 1fr) auto ${handPx}px`;
+  return `${hudPx}px minmax(0, 1fr) ${handPx}px`;
 }
 
 /** Percentage anchors *within the felt row's own box* (not the viewport). */
@@ -57,7 +55,7 @@ function computeRows() {
   // Short-height landscape (phones rotated) — compact the fixed rows hard so
   // the felt keeps most of the vertical space instead of HUD+hand eating it.
   if (h < 480 && w > h) {
-    return { hud: 36, seat: 0, dock: 0, hand: 96, compact: true } as const;
+    return { hud: 36, seat: 0, dock: 0, hand: 140, compact: true } as const;
   }
   if (w >= 640 && h < 780)
     return STAGE_ROWS.short;

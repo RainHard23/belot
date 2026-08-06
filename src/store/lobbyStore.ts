@@ -10,6 +10,7 @@ export interface LobbyTableRow {
   players: string;
   filled: number;
   stakes: string;
+  buyIn?: number;
   target?: number;
   seats: ({ sessionId: string; name: string } | null)[];
   matchId: string | null;
@@ -105,6 +106,7 @@ export const useLobbyStore = create<LobbyState>((set, get) => ({
         seatedTableId: tableId,
         status: "За столом — откройте вторую вкладку и нажмите «Играть»",
       });
+      window.dispatchEvent(new Event("belote:balance"));
     });
   },
   playBot: () => {
@@ -131,6 +133,7 @@ export const useLobbyStore = create<LobbyState>((set, get) => ({
   leave: (tableId) => {
     getSocket().emit("lobby:leave", { tableId });
     set({ matchId: null, seatedTableId: null, status: null });
+    window.dispatchEvent(new Event("belote:balance"));
   },
   setName: (name) => {
     sessionStorage.setItem("bilot_name", name);

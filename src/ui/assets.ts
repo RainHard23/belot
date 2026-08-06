@@ -11,6 +11,14 @@ export const ASSETS = {
     sapphire: "/images/room-backdrop-sapphire.jpg",
     burgundy: "/images/room-backdrop-burgundy.jpg",
     neon: "/images/room-backdrop-neon.jpg",
+    tavern: "/images/room-backdrop-tavern.png",
+  },
+  /**
+   * Full top-down scenes (room + table). Used by `roomStyle: "scene"`;
+   * `TableSurface` is hidden so cards sit on the painted oval.
+   */
+  scenePlates: {
+    tavern: "/images/scene-tavern.png",
   },
   /**
    * Seamless floor materials (CC0, Poly Haven — herringbone_parquet,
@@ -31,7 +39,18 @@ export const ASSETS = {
   chipRed: "/assets/chips/chip-red.svg",
   chipGold: "/assets/chips/chip-gold.svg",
   chipTeal: "/assets/chips/chip-teal.svg",
-  lobbyRef: "/assets/figma/lobby-ref.png",
+  lobby: {
+    eye: "/assets/lobby/icon-eye.svg",
+    eyeOff: "/assets/lobby/icon-eye-off.svg",
+    eyeGold: "/assets/lobby/icon-eye-gold.svg",
+    clock: "/assets/lobby/icon-clock.svg",
+    players: "/assets/lobby/icon-players.svg",
+    tables: "/assets/lobby/icon-tables.svg",
+    tournaments: "/assets/lobby/icon-tournaments.svg",
+    signal: "/assets/lobby/icon-signal.svg",
+    chat: "/assets/lobby/icon-chat.svg",
+    trophy: "/assets/lobby/icon-trophy.svg",
+  },
 } as const;
 
 export function avatarUrl(name: string, seed?: string): string {

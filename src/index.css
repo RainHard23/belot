@@ -320,6 +320,53 @@
   --accent-ring: rgba(224, 164, 88, 0.55);
 }
 
+/* Pirate tavern — parchment wood top, oak rail, warm candle light.
+ * Room art via roomStyle "scene"; table is procedural like other skins. */
+[data-table-theme="tavern"] {
+  --felt-hi: #e6c9a0;
+  --felt-mid: #c9a574;
+  --felt-lo: #9a7348;
+  --rail-hi: #8a5340;
+  --rail-mid: #5c3224;
+  --rail-lo: #2a1610;
+  --rail-rim: rgba(255, 210, 150, 0.32);
+  --table-glow: 0 0 70px 10px rgba(255, 170, 80, 0.16);
+  --floor-glow: rgba(255, 170, 80, 0.1);
+
+  --room-c1: #3a2a18;
+  --room-c2: #1a120a;
+  --room-c3: #080603;
+  --room-base: radial-gradient(ellipse at 50% 20%, var(--room-c1) 0%, var(--room-c2) 46%, var(--room-c3) 100%);
+  --wall-1: #3a2818;
+  --wall-2: #120c08;
+  --wall-panel-w: 96px;
+  --wall-strip: transparent;
+  --joint-color: rgba(255, 200, 140, 0.12);
+  --floor-tex: url("/textures/parquet.webp");
+  --floor-tex-size: 10cqh;
+  --floor-tint: #6a4a2a;
+  --floor-base: #1a1008;
+  --floor-pool: rgba(255, 190, 110, 0.28);
+  --horizon-fade: rgba(8, 5, 2, 0.95);
+  --cove-color: rgba(255, 180, 100, 0.28);
+  --sconce-color: rgba(255, 170, 90, 0.32);
+  --plinth-hi: rgba(255, 210, 150, 0.3);
+  --light-neutral: rgba(255, 200, 140, 0.16);
+  --light-warm: rgba(255, 180, 100, 0.28);
+  --light-cold: rgba(140, 150, 200, 0.1);
+  --reflect-opacity: 0.2;
+  --reflect-color: rgba(255, 200, 140, 0.5);
+  --floor-streak: rgba(255, 210, 150, 0.05);
+
+  --neon-ring: transparent;
+  --neon-ring-glow: none;
+
+  --accent: #e8a84a;
+  --accent-strong: #ffd090;
+  --accent-soft: rgba(232, 168, 74, 0.18);
+  --accent-ring: rgba(232, 168, 74, 0.55);
+}
+
 /*
  * (room-drift Ken Burns removed — static photo backdrop)
  * Ambient light pulses (MatchScreen AmbientOverlay). Opacity capped ~0.25 so
@@ -431,8 +478,9 @@ body,
 }
 
 body {
-  min-height: 100vh;
+  min-height: 100dvh;
   background: #19191d;
+  overscroll-behavior: none;
 }
 
 button {

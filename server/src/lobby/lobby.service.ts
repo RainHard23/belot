@@ -4,6 +4,7 @@ import { Injectable } from "@nestjs/common";
 export interface LobbySeat {
   sessionId: string;
   name: string;
+  userId?: string;
 }
 
 const BOT_PREFIX = "bot:";
@@ -19,11 +20,15 @@ export function botSessionId(tableId: string): string {
 export interface LobbyTable {
   id: string;
   name: string;
-  /** Display label: target points */
-  stakes: string;
+  /** Match point target (151 / 301 / 501). */
+  target: number;
+  /** Entry fee in coins (1 USD = 1 coin). */
+  buyIn: number;
   seats: (LobbySeat | null)[];
   matchId: string | null;
   status: "open" | "waiting" | "live";
+  /** SessionIds that have paid buy-in for this table seating. */
+  paidSessions: Set<string>;
 }
 
 const TABLE_NAMES = [
@@ -44,13 +49,17 @@ export class LobbyService {
   constructor() {
     for (let i = 1; i <= 12; i++) {
       const id = randomUUID();
+      const buyIn = i % 3 === 0 ? 50 : i % 2 === 0 ? 25 : 10;
+      const target = i % 3 === 0 ? 501 : i % 2 === 0 ? 301 : 151;
       this.tables.set(id, {
         id,
         name: `${TABLE_NAMES[i % TABLE_NAMES.length]} #${20 + i}`,
-        stakes: i % 3 === 0 ? "до 501" : i % 2 === 0 ? "до 301" : "до 151",
+        target,
+        buyIn,
         seats: [null, null],
         matchId: null,
         status: "open",
+        paidSessions: new Set(),
       });
     }
   }
@@ -74,8 +83,9 @@ export class LobbyService {
       type: "1×1",
       players: `${filled}/2`,
       filled,
-      stakes: t.stakes,
-      target: Number.parseInt(t.stakes.replace(/\D/g, ""), 10) || 501,
+      stakes: `${t.buyIn}`,
+      buyIn: t.buyIn,
+      target: t.target,
       seats: t.seats,
       matchId: t.matchId,
       status,
@@ -87,7 +97,6 @@ export class LobbyService {
     return this.tables.get(id);
   }
 
-  /** Leave every table this session occupies */
   leaveAll(sessionId: string): string[] {
     const touched: string[] = [];
     for (const t of this.tables.values()) {
@@ -103,12 +112,12 @@ export class LobbyService {
     tableId: string,
     sessionId: string,
     name: string,
-  ): { table: LobbyTable; seatIndex: number } | { error: string } {
+    userId?: string,
+  ): { table: LobbyTable; seatIndex: number; newlySeated: boolean } | { error: string } {
     const table = this.tables.get(tableId);
     if (!table)
       return { error: "table_not_found" };
 
-    // One table per session
     for (const other of this.tables.values()) {
       if (other.id === tableId)
         continue;
@@ -116,12 +125,10 @@ export class LobbyService {
         this.leave(other.id, sessionId);
     }
 
-    // Can't join a live match seat as a third player
     if (table.matchId && !table.seats.some(s => s?.sessionId === sessionId)) {
       const free = table.seats.findIndex(s => s === null);
       if (free < 0)
         return { error: "table_full" };
-      // Stale match with empty seat — clear and allow reseat
       if (table.seats.filter(Boolean).length < 2) {
         table.matchId = null;
       }
@@ -132,17 +139,28 @@ export class LobbyService {
 
     const existing = table.seats.findIndex(s => s?.sessionId === sessionId);
     if (existing >= 0) {
-      table.seats[existing] = { sessionId, name };
-      return { table, seatIndex: existing };
+      table.seats[existing] = { sessionId, name, userId };
+      return { table, seatIndex: existing, newlySeated: false };
     }
     const free = table.seats.findIndex(s => s === null);
     if (free < 0)
       return { error: "table_full" };
-    table.seats[free] = { sessionId, name };
-    return { table, seatIndex: free };
+    table.seats[free] = { sessionId, name, userId };
+    return { table, seatIndex: free, newlySeated: true };
   }
 
-  /** Seat a practice bot in the first free slot of a table. */
+  markPaid(tableId: string, sessionId: string) {
+    this.tables.get(tableId)?.paidSessions.add(sessionId);
+  }
+
+  clearPaid(tableId: string, sessionId: string) {
+    this.tables.get(tableId)?.paidSessions.delete(sessionId);
+  }
+
+  wasPaid(tableId: string, sessionId: string) {
+    return this.tables.get(tableId)?.paidSessions.has(sessionId) ?? false;
+  }
+
   sitBot(tableId: string, name = "Бот"): { table: LobbyTable; seatIndex: number } | { error: string } {
     const table = this.tables.get(tableId);
     if (!table)
@@ -154,7 +172,6 @@ export class LobbyService {
     return { table, seatIndex: free };
   }
 
-  /** First table with two free seats and no live match — used for solo practice. */
   findOpenTable(): LobbyTable | undefined {
     for (const t of this.tables.values()) {
       if (!t.matchId && t.seats.every(s => s === null))
@@ -170,9 +187,11 @@ export class LobbyService {
     table.seats = table.seats.map(s =>
       s?.sessionId === sessionId ? null : s,
     ) as (LobbySeat | null)[];
+    table.paidSessions.delete(sessionId);
     if (table.seats.every(s => s === null)) {
       table.matchId = null;
       table.status = "open";
+      table.paidSessions.clear();
     }
   }
 
